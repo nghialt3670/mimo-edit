@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mmedit-framework"
+version = "0.1.0"
+description = "A multi-turn image-editing agent with bundled model inference"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "accelerate>=1.15.0",
+    "diffusers>=0.41.0.dev0",
+    "ipykernel>=7.4.0",
+    "matplotlib>=3.11.2",
+    "opencv-python>=5.0.0.93",
+    "pillow>=12.3.0",
+    "scipy>=1.18.1",
+    "smolagents>=1.26.0",
+    "torch>=2.14.1",
+    "torchvision>=0.29.1",
+    "transformers>=5.19.0.dev0",
+]
+
+[project.optional-dependencies]
+models = [
+    "accelerate>=1.12.0",
+    "diffusers @ git+https://github.com/huggingface/diffusers.git",
+    "huggingface-hub>=0.36.0",
+    "numpy>=2.5.3",
+    "opencv-python-headless>=5.0.0.93",
+    "safetensors>=0.5.3",
+    "scipy>=1.15.3",
+    "torch>=2.9.1",
+    "torchvision>=0.24.1",
+    "transformers @ git+https://github.com/huggingface/transformers.git",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["core*", "inference*", "tools*", "utils*"]
+
+[tool.setuptools.package-data]
+inference = ["objectclear/LICENSE"]
