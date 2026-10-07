@@ -9,7 +9,11 @@ from inference.editing import (
     edit_masked_object,
     semantic_edit_crop,
 )
-from inference.inpainting import inpaint_with_gligen, inpaint_with_stable_diffusion
+from inference.inpainting import (
+    inpaint_with_configured_backend,
+    inpaint_with_gligen,
+    inpaint_with_stable_diffusion,
+)
 from tools.image_editing.apply_filter import apply_filter
 from tools import image_editing_tools
 from tools.image_editing.generate_object import generate_object
@@ -61,6 +65,32 @@ class ModelConfigTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported model config keys"):
             ModelConfig(model_ids={"unknown_tool": "org/model"})
 
+    def test_model_config_validates_backend_choices(self):
+        config = ModelConfig(
+            backends={
+                "edit_object": "flux2-klein-9b-kv",
+                "generate_object_mask": "flux-fill",
+                "generate_object_box": "flux-fill",
+            }
+        )
+
+        self.assertEqual(config.backend("edit_object", "default"), "flux2-klein-9b-kv")
+        with self.assertRaisesRegex(ValueError, "unsupported model backend keys"):
+            ModelConfig(backends={"unknown_tool": "flux-fill"})
+        with self.assertRaisesRegex(ValueError, "unsupported model backend choices"):
+            ModelConfig(backends={"edit_object": "flux-fill"})
+
+    def test_route_model_id_override_precedes_legacy_generate_object_override(self):
+        config = ModelConfig(
+            model_ids={
+                "generate_object": "org/legacy",
+                "generate_object_box": "org/box",
+            }
+        )
+
+        self.assertEqual(config.model_id("generate_object_mask", "default"), "org/legacy")
+        self.assertEqual(config.model_id("generate_object_box", "default"), "org/box")
+
     def test_regional_edit_composites_changes_inside_padding(self):
         source = Image.new("RGB", (64, 64), "blue")
         mask = Image.new("L", source.size, 0)
@@ -75,10 +105,11 @@ class ModelConfigTests(unittest.TestCase):
             )
 
         self.assertNotEqual(result.getpixel((18, 30)), (0, 0, 255))
-        self.assertEqual(result.getpixel((10, 30)), (0, 0, 255))
+        self.assertNotEqual(result.getpixel((10, 30)), (0, 0, 255))
+        self.assertEqual(result.getpixel((7, 30)), (0, 0, 255))
         self.assertEqual(result.getpixel((30, 30)), (255, 0, 0))
 
-    def test_local_edit_composites_only_inside_original_mask(self):
+    def test_local_edit_feathers_original_mask_boundary(self):
         source = Image.new("RGB", (40, 40), "blue")
         mask = Image.new("L", source.size, 0)
         ImageDraw.Draw(mask).rectangle((10, 10, 29, 29), fill=255)
@@ -94,7 +125,13 @@ class ModelConfigTests(unittest.TestCase):
             )
 
         self.assertEqual(result.getpixel((0, 0)), (0, 0, 255))
-        self.assertEqual(result.getpixel((9, 20)), (0, 0, 255))
+        transition_pixel = result.getpixel((9, 20))
+        self.assertGreater(transition_pixel[0], 0)
+        self.assertLess(transition_pixel[0], 255)
+        self.assertGreater(transition_pixel[2], 0)
+        self.assertLess(transition_pixel[2], 255)
+        self.assertEqual(result.getpixel((3, 20)), (0, 0, 255))
+        self.assertEqual(result.getpixel((10, 20)), (255, 0, 0))
         self.assertEqual(result.getpixel((15, 20)), (255, 0, 0))
 
     def test_regional_edit_uses_padded_crop_and_dilated_composite_mask(self):
@@ -116,12 +153,15 @@ class ModelConfigTests(unittest.TestCase):
             )
 
         crop, prompt = edit.call_args.args[1:3]
-        self.assertEqual(crop.size, (90, 30))
+        self.assertGreater(crop.width, 90)
+        self.assertGreater(crop.height, 30)
         self.assertIn("add a hat", prompt)
+        self.assertEqual(result.getpixel((30, 30)), (255, 0, 0))
         self.assertNotEqual(result.getpixel((15, 30)), (0, 0, 255))
-        self.assertEqual(result.getpixel((14, 30)), (0, 0, 255))
+        self.assertNotEqual(result.getpixel((14, 30)), (0, 0, 255))
         self.assertNotEqual(result.getpixel((60, 15)), (0, 0, 255))
-        self.assertEqual(result.getpixel((60, 14)), (0, 0, 255))
+        self.assertNotEqual(result.getpixel((60, 14)), (0, 0, 255))
+        self.assertEqual(result.getpixel((8, 30)), (0, 0, 255))
 
     def test_global_edit_passes_full_image_and_returns_full_result(self):
         source = Image.new("RGB", (40, 30), "blue")
@@ -225,6 +265,18 @@ class ModelConfigTests(unittest.TestCase):
         self.assertIn("mask", tools["edit_object"].inputs)
         self.assertNotIn("masks", tools["edit_object"].inputs)
         self.assertIn("mode", tools["edit_object"].inputs)
+        self.assertIn(
+            "not just a label or category",
+            tools["edit_object"].description,
+        )
+        self.assertIn(
+            "Transform the selected man into a woman",
+            tools["edit_object"].description,
+        )
+        self.assertIn(
+            "Do not pass only a subject/category label",
+            tools["edit_object"].inputs["prompt"]["description"],
+        )
         self.assertIn("mask", tools["apply_filter"].inputs)
         self.assertTrue(tools["apply_filter"].inputs["mask"]["nullable"])
         for name in (
@@ -255,7 +307,7 @@ class ModelConfigTests(unittest.TestCase):
         models = ModelCache()
 
         with patch(
-            "tools.image_editing.generate_object.inpaint_with_stable_diffusion",
+            "tools.image_editing.generate_object.inpaint_with_configured_backend",
             return_value=generated,
         ) as inpaint:
             mask_result = generate_object(models, image, "fill this area", mask=mask)
@@ -267,10 +319,76 @@ class ModelConfigTests(unittest.TestCase):
         self.assertIs(box_result, generated)
         self.assertEqual(inpaint.call_count, 2)
         self.assertEqual(
-            [call.kwargs["model_key"] for call in inpaint.call_args_list],
-            ["generate_object", "generate_object"],
+            [call.kwargs["route_key"] for call in inpaint.call_args_list],
+            ["generate_object_mask", "generate_object_box"],
         )
         self.assertEqual(inpaint.call_args_list[1].args[2].getbbox(), (5, 5, 16, 16))
+
+    def test_configured_generate_object_backend_selects_flux_fill(self):
+        image = Image.new("RGB", (31, 29), "blue")
+        mask = Image.new("L", image.size, 255)
+        generated = Image.new("RGB", (32, 32), "red")
+        pipeline = Mock(return_value=Mock(images=[generated]))
+        models = ModelCache(
+            ModelConfig(
+                backends={
+                    "generate_object_mask": "flux-fill",
+                    "generate_object_box": "flux-fill",
+                },
+                model_ids={
+                    "generate_object_mask": "org/custom-mask-fill",
+                    "generate_object_box": "org/custom-box-fill",
+                },
+            )
+        )
+
+        with (
+            patch("inference.inpainting.device", return_value="cpu"),
+            patch("inference.inpainting._load_flux_fill", return_value=pipeline) as load,
+        ):
+            box_result = inpaint_with_configured_backend(
+                models, image, mask, "fill this area", route_key="generate_object_box"
+            )
+            mask_result = inpaint_with_configured_backend(
+                models, image, mask, "fill this area", route_key="generate_object_mask"
+            )
+
+        self.assertEqual(
+            [call.args[0] for call in load.call_args_list],
+            ["org/custom-box-fill", "org/custom-mask-fill"],
+        )
+        self.assertEqual(box_result.size, image.size)
+        self.assertEqual(mask_result.size, image.size)
+        self.assertEqual(pipeline.call_count, 2)
+        kwargs = pipeline.call_args_list[0].kwargs
+        self.assertEqual(kwargs["image"].size, (32, 32))
+        self.assertEqual(kwargs["mask_image"].size, (32, 32))
+        self.assertEqual(kwargs["prompt"], "fill this area")
+        self.assertEqual(kwargs["guidance_scale"], 30)
+        self.assertEqual(kwargs["num_inference_steps"], 50)
+
+    def test_configured_generate_object_backend_preserves_stable_diffusion_default(self):
+        image = Image.new("RGB", (20, 20), "blue")
+        mask = Image.new("L", image.size, 255)
+        generated = Image.new("RGB", image.size, "red")
+        models = ModelCache()
+
+        with patch(
+            "inference.inpainting.inpaint_with_stable_diffusion",
+            return_value=generated,
+        ) as stable_diffusion:
+            result = inpaint_with_configured_backend(
+                models,
+                image,
+                mask,
+                "fill this area",
+                route_key="generate_object_mask",
+            )
+
+        self.assertIs(result, generated)
+        stable_diffusion.assert_called_once()
+        self.assertIs(stable_diffusion.call_args.args[0], models)
+        self.assertEqual(stable_diffusion.call_args.kwargs["model_key"], "generate_object_mask")
 
     def test_inpainting_routes_restore_source_image_dimensions(self):
         image = Image.new("RGB", (80, 60), "blue")
@@ -300,6 +418,14 @@ class ModelConfigTests(unittest.TestCase):
 
         self.assertEqual(filled.size, image.size)
         self.assertEqual(placed.size, image.size)
+        self.assertEqual(
+            gligen_pipeline.call_args.kwargs["gligen_scheduled_sampling_beta"],
+            0.3,
+        )
+        self.assertEqual(
+            gligen_pipeline.call_args.kwargs["gligen_boxes"],
+            [[0.125, 1 / 6, 0.375, 0.5]],
+        )
 
     def test_segment_object_text_returns_highest_scoring_mask(self):
         image = Image.new("RGB", (20, 20), "blue")
@@ -373,7 +499,27 @@ class ModelConfigTests(unittest.TestCase):
         ) as loader:
             result = semantic_edit_crop(models, image, "edit")
 
-        loader.assert_called_once_with("black-forest-labs/FLUX.2-klein-4B")
+        loader.assert_called_once_with(
+            "black-forest-labs/FLUX.2-klein-4B", "flux2-klein-4b"
+        )
+        backend.edit.assert_called_once_with(image, "edit")
+        self.assertIs(result, image)
+
+    def test_flux2_klein_9b_kv_selects_kv_pipeline_and_checkpoint(self):
+        models = ModelCache(ModelConfig(backends={"edit_object": "flux2-klein-9b-kv"}))
+        image = Image.new("RGB", (12, 12), "blue")
+        backend = Mock()
+        backend.edit.return_value = image
+
+        with patch(
+            "inference.editing._load_flux2_klein_image_edit_backend",
+            return_value=backend,
+        ) as loader:
+            result = semantic_edit_crop(models, image, "edit")
+
+        loader.assert_called_once_with(
+            "black-forest-labs/FLUX.2-klein-9b-kv", "flux2-klein-9b-kv"
+        )
         backend.edit.assert_called_once_with(image, "edit")
         self.assertIs(result, image)
 
@@ -401,6 +547,30 @@ class ModelConfigTests(unittest.TestCase):
         pipeline.to.assert_called_once_with("mps")
         self.assertIs(backend.pipeline, pipeline)
 
+    def test_flux2_klein_kv_loader_uses_kv_pipeline(self):
+        import torch
+
+        pipeline = Mock()
+        pipeline.to.return_value = pipeline
+        with (
+            patch("inference.editing.device", return_value="cuda"),
+            patch(
+                "diffusers.Flux2KleinKVPipeline.from_pretrained",
+                return_value=pipeline,
+            ) as load_pipeline,
+        ):
+            backend = _load_flux2_klein_image_edit_backend(
+                "black-forest-labs/FLUX.2-klein-9b-kv", "flux2-klein-9b-kv"
+            )
+
+        load_pipeline.assert_called_once_with(
+            "black-forest-labs/FLUX.2-klein-9b-kv",
+            torch_dtype=torch.bfloat16,
+            low_cpu_mem_usage=True,
+        )
+        pipeline.to.assert_called_once_with("cuda")
+        self.assertIs(backend.pipeline, pipeline)
+
     def test_flux2_klein_edit_uses_image_conditioned_four_step_inference(self):
         from inference.editing import Flux2KleinImageEditBackend
 
@@ -418,6 +588,23 @@ class ModelConfigTests(unittest.TestCase):
         self.assertEqual(kwargs["prompt"], "add a hat")
         self.assertEqual(kwargs["num_inference_steps"], 4)
         self.assertEqual(kwargs["guidance_scale"], 1.0)
+        self.assertEqual(result.getpixel((0, 0)), (255, 0, 0))
+
+    def test_flux2_klein_kv_edit_uses_supported_pipeline_arguments(self):
+        from inference.editing import Flux2KleinImageEditBackend
+
+        source = Image.new("RGB", (16, 16), "blue")
+        generated = Image.new("RGB", source.size, "red")
+        pipeline = Mock()
+        pipeline.return_value.images = [generated]
+        backend = Flux2KleinImageEditBackend(pipeline, guidance_scale=None)
+
+        with patch("inference.editing.device", return_value="cpu"):
+            result = backend.edit(source, "add a hat")
+
+        kwargs = pipeline.call_args.kwargs
+        self.assertEqual(kwargs["num_inference_steps"], 4)
+        self.assertNotIn("guidance_scale", kwargs)
         self.assertEqual(result.getpixel((0, 0)), (255, 0, 0))
 
 if __name__ == "__main__":

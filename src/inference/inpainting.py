@@ -73,11 +73,66 @@ def _load_stable_diffusion(model_id: str):
     return pipeline
 
 
+def _load_flux_fill(model_id: str):
+    from diffusers import FluxFillPipeline
+
+    import torch
+
+    model_device = device()
+    if model_device.startswith("cuda"):
+        dtype = torch.bfloat16
+    elif model_device == "mps":
+        dtype = torch.float16
+    else:
+        dtype = torch.float32
+    return FluxFillPipeline.from_pretrained(
+        model_id,
+        torch_dtype=dtype,
+        low_cpu_mem_usage=True,
+    ).to(model_device)
+
+
 def _match_image_size(image: Image.Image, size: tuple[int, int]) -> Image.Image:
     image = image.convert("RGB")
     if image.size != size:
         image = image.resize(size, Image.Resampling.LANCZOS)
     return image
+
+
+def _inpaint_with_flux_fill(
+    models: ModelCache,
+    image: Image.Image,
+    mask: Image.Image,
+    prompt: str,
+    *,
+    model_key: str,
+) -> Image.Image:
+    import torch
+
+    original_size = image.size
+    default_model_id = "black-forest-labs/FLUX.1-Fill-dev"
+    model_id = models.config.model_id(model_key, default_model_id)
+    pipeline = models.get(
+        "flux_fill",
+        lambda: _load_flux_fill(model_id),
+        model_id=model_id,
+    )
+    width = max(16, round(image.width / 16) * 16)
+    height = max(16, round(image.height / 16) * 16)
+    image = image.convert("RGB").resize((width, height), Image.Resampling.LANCZOS)
+    mask = mask.convert("L").resize((width, height), Image.Resampling.NEAREST)
+    result = pipeline(
+        prompt=prompt,
+        image=image,
+        mask_image=mask,
+        height=height,
+        width=width,
+        guidance_scale=30,
+        num_inference_steps=50,
+        max_sequence_length=512,
+        generator=torch.Generator(device=device()).manual_seed(42),
+    )
+    return _match_image_size(result.images[0], original_size)
 
 
 def inpaint_with_stable_diffusion(
@@ -111,6 +166,28 @@ def inpaint_with_stable_diffusion(
         generator=torch.Generator(device=device()).manual_seed(42),
     )
     return _match_image_size(result.images[0], original_size)
+
+
+def inpaint_with_configured_backend(
+    models: ModelCache,
+    image: Image.Image,
+    mask: Image.Image,
+    prompt: str,
+    *,
+    route_key: str,
+) -> Image.Image:
+    if route_key not in ("generate_object_mask", "generate_object_box"):
+        raise ValueError(f"unsupported generate_object route: {route_key}")
+    selected_backend = models.config.backend(route_key, "stable-diffusion")
+    if selected_backend == "flux-fill":
+        return _inpaint_with_flux_fill(
+            models, image, mask, prompt, model_key=route_key
+        )
+    if selected_backend == "stable-diffusion":
+        return inpaint_with_stable_diffusion(
+            models, image, mask, prompt, model_key=route_key
+        )
+    raise ValueError(f"unsupported generate_object backend: {selected_backend}")
 
 
 def _load_gligen(model_id: str):
@@ -161,7 +238,7 @@ def inpaint_with_gligen(
         gligen_phrases=phrases,
         gligen_boxes=normalized_boxes,
         gligen_inpaint_image=image.convert("RGB"),
-        gligen_scheduled_sampling_beta=1,
+        gligen_scheduled_sampling_beta=0.3,
         num_inference_steps=50,
         output_type="pil",
         generator=torch.Generator(device=device()).manual_seed(42),

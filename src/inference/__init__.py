@@ -1,6 +1,7 @@
 from .editing import edit_masked_object, scale_masked_object
 from .generation import generate_with_flux
 from .inpainting import (
+    inpaint_with_configured_backend,
     inpaint_with_gligen,
     inpaint_with_stable_diffusion,
     remove_with_object_clear,
@@ -13,6 +14,7 @@ __all__ = [
     "ModelConfig",
     "edit_masked_object",
     "generate_with_flux",
+    "inpaint_with_configured_backend",
     "inpaint_with_gligen",
     "inpaint_with_stable_diffusion",
     "remove_with_object_clear",

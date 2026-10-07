@@ -11,3 +11,9 @@ wheels/
 
 # Environment variables
 .env
+
+# Outputs
+outputs/
+
+# VieScore key
+.viescore.key

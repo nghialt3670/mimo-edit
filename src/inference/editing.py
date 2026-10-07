@@ -37,26 +37,37 @@ def scale_masked_object(
 class Flux2KleinImageEditBackend:
     """Adapter for FLUX.2 Klein's image-conditioned editing pipeline."""
 
-    def __init__(self, pipeline: Any):
+    def __init__(self, pipeline: Any, guidance_scale: float | None = 1.0):
         self.pipeline = pipeline
+        self.guidance_scale = guidance_scale
 
     def edit(self, image: Image.Image, prompt: str) -> Image.Image:
         import torch
 
+        kwargs: dict[str, Any] = {
+            "image": image.convert("RGB"),
+            "prompt": prompt,
+            "num_inference_steps": 4,
+            "generator": torch.Generator(device=device()).manual_seed(42),
+        }
+        if self.guidance_scale is not None:
+            kwargs["guidance_scale"] = self.guidance_scale
         result = self.pipeline(
-            image=image.convert("RGB"),
-            prompt=prompt,
-            num_inference_steps=4,
-            guidance_scale=1.0,
-            generator=torch.Generator(device=device()).manual_seed(42),
+            **kwargs
         )
         return result.images[0].convert("RGB")
 
 
 def _load_flux2_klein_image_edit_backend(
     model_id: str,
+    backend: str = "flux2-klein-4b",
 ) -> Flux2KleinImageEditBackend:
-    from diffusers import Flux2KleinPipeline
+    if backend == "flux2-klein-4b":
+        from diffusers import Flux2KleinPipeline as Pipeline
+    elif backend == "flux2-klein-9b-kv":
+        from diffusers import Flux2KleinKVPipeline as Pipeline
+    else:
+        raise ValueError(f"unsupported FLUX.2 Klein backend: {backend}")
 
     import torch
 
@@ -67,21 +78,27 @@ def _load_flux2_klein_image_edit_backend(
         dtype = torch.float16
     else:
         dtype = torch.float32
-    pipeline = Flux2KleinPipeline.from_pretrained(
+    pipeline = Pipeline.from_pretrained(
         model_id,
         torch_dtype=dtype,
         low_cpu_mem_usage=True,
     ).to(model_device)
-    return Flux2KleinImageEditBackend(pipeline)
+    guidance_scale = 1.0 if backend == "flux2-klein-4b" else None
+    return Flux2KleinImageEditBackend(pipeline, guidance_scale=guidance_scale)
 
 
 def semantic_edit_crop(
     models: ModelCache, crop: Image.Image, prompt: str
 ) -> Image.Image:
-    model_id = models.config.model_id("edit_object", "black-forest-labs/FLUX.2-klein-4B")
+    backend_name = models.config.backend("edit_object", "flux2-klein-4b")
+    default_model_id = {
+        "flux2-klein-4b": "black-forest-labs/FLUX.2-klein-4B",
+        "flux2-klein-9b-kv": "black-forest-labs/FLUX.2-klein-9b-kv",
+    }[backend_name]
+    model_id = models.config.model_id("edit_object", default_model_id)
     backend = models.get(
-        "flux2_klein_image_edit",
-        lambda: _load_flux2_klein_image_edit_backend(model_id),
+        backend_name,
+        lambda: _load_flux2_klein_image_edit_backend(model_id, backend_name),
         model_id=model_id,
     )
     return backend.edit(crop, prompt)
@@ -122,7 +139,7 @@ def edit_masked_object(
     mode: EditMode = "local",
     padding: float = 0.25,
 ) -> Image.Image:
-    """Edit one masked object locally, within a padded region, or globally."""
+    """Edit one masked object and feather the local/regional composite boundary."""
     if not isinstance(image, Image.Image):
         raise TypeError("image must be a Pillow image")
     if not isinstance(mask, Image.Image):
@@ -154,28 +171,38 @@ def edit_masked_object(
     if mode == "regional":
         padding_x = round((right - left) * padding)
         padding_y = round((bottom - top) * padding)
-        dilated_mask = maximum_filter(
-            np.asarray(mask),
-            size=(padding_y * 2 + 1, padding_x * 2 + 1),
-            mode="constant",
-            cval=0,
+        allowed_mask = Image.fromarray(
+            maximum_filter(
+                np.asarray(mask),
+                size=(padding_y * 2 + 1, padding_x * 2 + 1),
+                mode="constant",
+                cval=0,
+            )
         )
-        allowed_mask = Image.fromarray(dilated_mask)
     else:
         padding_x = max(16, round((right - left) * 0.2))
         padding_y = max(16, round((bottom - top) * 0.2))
         allowed_mask = mask
 
+    feather_radius = min(12.0, max(2.0, min(right - left, bottom - top) * 0.04))
+    feather_support = int(np.ceil(feather_radius * 3))
+    allowed_bounds = allowed_mask.getbbox()
+    if allowed_bounds is None:
+        raise ValueError("mask is empty")
+    allowed_left, allowed_top, allowed_right, allowed_bottom = allowed_bounds
+    crop_padding_x = feather_support + (padding_x if mode == "local" else 0)
+    crop_padding_y = feather_support + (padding_y if mode == "local" else 0)
     crop_box = (
-        max(0, left - padding_x),
-        max(0, top - padding_y),
-        min(image.width, right + padding_x),
-        min(image.height, bottom + padding_y),
+        max(0, allowed_left - crop_padding_x),
+        max(0, allowed_top - crop_padding_y),
+        min(image.width, allowed_right + crop_padding_x),
+        min(image.height, allowed_bottom + crop_padding_y),
     )
     original_crop = current.crop(crop_box)
-    composite_mask = ImageChops.darker(
-        allowed_mask.filter(ImageFilter.GaussianBlur(radius=0.8)), allowed_mask
+    feathered_mask = allowed_mask.filter(
+        ImageFilter.GaussianBlur(radius=feather_radius)
     )
+    composite_mask = ImageChops.lighter(allowed_mask, feathered_mask)
     edited_crop = semantic_edit_crop(models, original_crop, instruction)
     if edited_crop.size != original_crop.size:
         edited_crop = edited_crop.resize(original_crop.size, Image.Resampling.LANCZOS)

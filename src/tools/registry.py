@@ -68,6 +68,7 @@ class _RegisteredTool(Tool):
         self.output_type = spec.output_type
 
         parameters = [Parameter("self", Parameter.POSITIONAL_OR_KEYWORD)]
+        call_parameters = []
         annotations: dict[str, Any] = {}
         for name, schema in spec.inputs.items():
             declared_types = schema["type"]
@@ -80,17 +81,32 @@ class _RegisteredTool(Tool):
             if nullable:
                 annotation = annotation | None
             annotations[name] = annotation
+            default = None if nullable else _empty
             parameters.append(
                 Parameter(
                     name,
                     Parameter.KEYWORD_ONLY,
-                    default=None if nullable else _empty,
+                    default=default,
+                    annotation=annotation,
+                )
+            )
+            call_parameters.append(
+                Parameter(
+                    name,
+                    Parameter.POSITIONAL_OR_KEYWORD,
+                    default=default,
                     annotation=annotation,
                 )
             )
 
-        def dispatch(_self: _RegisteredTool, **kwargs: Any) -> Any:
-            return spec.handler(context, **kwargs)
+        call_signature = Signature(call_parameters)
+
+        def dispatch(
+            _self: _RegisteredTool, *args: Any, **kwargs: Any
+        ) -> Any:
+            bound = call_signature.bind(*args, **kwargs)
+            bound.apply_defaults()
+            return spec.handler(context, **bound.arguments)
 
         forward = dispatch
         forward.__signature__ = Signature(parameters)

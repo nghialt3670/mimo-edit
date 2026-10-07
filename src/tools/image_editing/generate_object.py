@@ -6,7 +6,7 @@ from utils.image import validate_box
 from inference import (
     ModelCache,
     inpaint_with_gligen,
-    inpaint_with_stable_diffusion,
+    inpaint_with_configured_backend,
 )
 from ..registry import register_tool
 
@@ -65,13 +65,14 @@ def generate_object(
         raise ValueError("Provide a mask or a box, not both")
     if mask is None and box is None:
         raise ValueError("Provide one mask or one box to select a generation region")
+    route_key = "generate_object_box" if mask is None else "generate_object_mask"
     if mask is None:
         mask = Image.new("L", image.size, 0)
         ImageDraw.Draw(mask).rectangle(validate_box(box), fill=255)
-    return inpaint_with_stable_diffusion(
+    return inpaint_with_configured_backend(
         models,
         image,
         mask,
         prompt,
-        model_key="generate_object",
+        route_key=route_key,
     )
