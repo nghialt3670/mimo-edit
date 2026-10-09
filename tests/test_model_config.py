@@ -3,25 +3,51 @@ from unittest.mock import Mock, patch
 
 from PIL import Image, ImageDraw
 
-from inference import ModelCache, ModelConfig
-from inference.editing import (
+from framework.inference import ModelCache, ModelConfig
+from framework.inference import warmup_default_models
+from framework.inference.editing import (
     _load_flux2_klein_image_edit_backend,
     edit_masked_object,
     semantic_edit_crop,
 )
-from inference.inpainting import (
-    inpaint_with_configured_backend,
-    inpaint_with_gligen,
-    inpaint_with_stable_diffusion,
-)
-from tools.image_editing.apply_filter import apply_filter
-from tools import image_editing_tools
-from tools.image_editing.generate_object import generate_object
-from tools.image_editing.segment_object import segment_object
-from utils.image import masked_layer, paste_layer
+from framework.tools.image_editing.apply_filter import apply_filter
+from framework.tools import image_editing_tools
+from framework.tools.image_editing.generate_object import generate_object
+from framework.tools.image_editing.segment_object import segment_object
+from framework.utils.image import masked_layer, paste_layer
 
 
 class ModelConfigTests(unittest.TestCase):
+    def test_default_model_warmup_loads_each_default_backbone(self):
+        with (
+            patch("framework.inference.warmup._load_sam3", return_value=object()) as sam3,
+            patch(
+                "framework.inference.warmup._load_flux2_klein_image_edit_backend",
+                return_value=object(),
+            ) as flux2,
+            patch(
+                "framework.inference.warmup._load_object_clear",
+                return_value=object(),
+            ) as object_clear,
+            patch("torch.cuda.is_available", return_value=False),
+            patch("torch.backends.mps.is_available", return_value=False),
+        ):
+            warmed = warmup_default_models()
+
+        self.assertEqual(
+            warmed,
+            [
+                "facebook/sam3",
+                "black-forest-labs/FLUX.2-klein-4B",
+                "jixin0101/ObjectClear",
+            ],
+        )
+        sam3.assert_called_once_with("facebook/sam3")
+        flux2.assert_called_once_with(
+            "black-forest-labs/FLUX.2-klein-4B", "flux2-klein-4b"
+        )
+        object_clear.assert_called_once_with("jixin0101/ObjectClear")
+
     def test_masked_layer_feathers_edges_without_background_color_fringe(self):
         image = Image.new("RGB", (20, 20), "blue")
         ImageDraw.Draw(image).rectangle((5, 5, 14, 14), fill="red")
@@ -45,10 +71,10 @@ class ModelConfigTests(unittest.TestCase):
         self.assertEqual(composite.getpixel((1, 10)), (0, 128, 0))
 
     def test_tool_model_override_and_defaults(self):
-        config = ModelConfig(model_ids={"generate_object": "org/custom-inpaint"})
+        config = ModelConfig(model_ids={"edit_object": "org/custom-klein"})
 
         self.assertEqual(
-            config.model_id("generate_object", "default"), "org/custom-inpaint"
+            config.model_id("edit_object", "default"), "org/custom-klein"
         )
         self.assertEqual(config.model_id("remove_object", "default"), "default")
 
@@ -69,27 +95,25 @@ class ModelConfigTests(unittest.TestCase):
         config = ModelConfig(
             backends={
                 "edit_object": "flux2-klein-9b-kv",
-                "generate_object_mask": "flux-fill",
-                "generate_object_box": "flux-fill",
             }
         )
 
         self.assertEqual(config.backend("edit_object", "default"), "flux2-klein-9b-kv")
         with self.assertRaisesRegex(ValueError, "unsupported model backend keys"):
-            ModelConfig(backends={"unknown_tool": "flux-fill"})
+            ModelConfig(backends={"generate_object_mask": "legacy-backend"})
         with self.assertRaisesRegex(ValueError, "unsupported model backend choices"):
-            ModelConfig(backends={"edit_object": "flux-fill"})
+            ModelConfig(backends={"edit_object": "legacy-backend"})
 
-    def test_route_model_id_override_precedes_legacy_generate_object_override(self):
+    def test_generate_object_uses_edit_object_model_configuration(self):
         config = ModelConfig(
             model_ids={
-                "generate_object": "org/legacy",
-                "generate_object_box": "org/box",
+                "edit_object": "org/klein",
             }
         )
 
-        self.assertEqual(config.model_id("generate_object_mask", "default"), "org/legacy")
-        self.assertEqual(config.model_id("generate_object_box", "default"), "org/box")
+        self.assertEqual(config.model_id("edit_object", "default"), "org/klein")
+        with self.assertRaisesRegex(ValueError, "unsupported model config keys"):
+            ModelConfig(model_ids={"generate_object_box": "org/old-inpainting"})
 
     def test_regional_edit_composites_changes_inside_padding(self):
         source = Image.new("RGB", (64, 64), "blue")
@@ -98,7 +122,7 @@ class ModelConfigTests(unittest.TestCase):
         generated = Image.new("RGB", source.size, "red")
 
         with patch(
-            "inference.editing.semantic_edit_crop", return_value=generated
+            "framework.inference.editing.semantic_edit_crop", return_value=generated
         ):
             result = edit_masked_object(
                 ModelCache(), source, mask, "add a hat", mode="regional", padding=0.25
@@ -115,7 +139,7 @@ class ModelConfigTests(unittest.TestCase):
         ImageDraw.Draw(mask).rectangle((10, 10, 29, 29), fill=255)
         generated = Image.new("RGB", source.size, "red")
 
-        with patch("inference.editing.semantic_edit_crop", return_value=generated):
+        with patch("framework.inference.editing.semantic_edit_crop", return_value=generated):
             result = edit_masked_object(
                 ModelCache(),
                 source,
@@ -141,7 +165,7 @@ class ModelConfigTests(unittest.TestCase):
         generated = Image.new("RGB", (90, 30), "red")
 
         with patch(
-            "inference.editing.semantic_edit_crop", return_value=generated
+            "framework.inference.editing.semantic_edit_crop", return_value=generated
         ) as edit:
             result = edit_masked_object(
                 ModelCache(),
@@ -169,7 +193,7 @@ class ModelConfigTests(unittest.TestCase):
         ImageDraw.Draw(mask).rectangle((10, 8, 20, 18), fill=255)
         generated = Image.new("RGB", source.size, "red")
         with patch(
-            "inference.editing.semantic_edit_crop", return_value=generated
+            "framework.inference.editing.semantic_edit_crop", return_value=generated
         ) as edit:
             result = edit_masked_object(
                 ModelCache(), source, mask, "change the whole scene", mode="global"
@@ -299,7 +323,7 @@ class ModelConfigTests(unittest.TestCase):
         for selector in ("prompt", "point", "box", "scribble"):
             self.assertIn(selector, tools["segment_object"].inputs)
 
-    def test_generate_object_uses_shared_inpainting_route_for_mask_and_box(self):
+    def test_generate_object_uses_klein_regional_edit_for_mask_and_box(self):
         image = Image.new("RGB", (20, 20), "blue")
         mask = Image.new("L", image.size, 0)
         ImageDraw.Draw(mask).rectangle((5, 5, 14, 14), fill=255)
@@ -307,9 +331,9 @@ class ModelConfigTests(unittest.TestCase):
         models = ModelCache()
 
         with patch(
-            "tools.image_editing.generate_object.inpaint_with_configured_backend",
+            "framework.tools.image_editing.generate_object.edit_masked_object",
             return_value=generated,
-        ) as inpaint:
+        ) as edit:
             mask_result = generate_object(models, image, "fill this area", mask=mask)
             box_result = generate_object(
                 models, image, "fill this area", box=[5, 5, 15, 15]
@@ -317,114 +341,43 @@ class ModelConfigTests(unittest.TestCase):
 
         self.assertIs(mask_result, generated)
         self.assertIs(box_result, generated)
-        self.assertEqual(inpaint.call_count, 2)
+        self.assertEqual(edit.call_count, 2)
+        self.assertEqual(edit.call_args_list[0].args[:3], (models, image, mask))
         self.assertEqual(
-            [call.kwargs["route_key"] for call in inpaint.call_args_list],
-            ["generate_object_mask", "generate_object_box"],
+            edit.call_args_list[0].kwargs, {"mode": "regional", "padding": 0}
         )
-        self.assertEqual(inpaint.call_args_list[1].args[2].getbbox(), (5, 5, 16, 16))
-
-    def test_configured_generate_object_backend_selects_flux_fill(self):
-        image = Image.new("RGB", (31, 29), "blue")
-        mask = Image.new("L", image.size, 255)
-        generated = Image.new("RGB", (32, 32), "red")
-        pipeline = Mock(return_value=Mock(images=[generated]))
-        models = ModelCache(
-            ModelConfig(
-                backends={
-                    "generate_object_mask": "flux-fill",
-                    "generate_object_box": "flux-fill",
-                },
-                model_ids={
-                    "generate_object_mask": "org/custom-mask-fill",
-                    "generate_object_box": "org/custom-box-fill",
-                },
-            )
-        )
-
-        with (
-            patch("inference.inpainting.device", return_value="cpu"),
-            patch("inference.inpainting._load_flux_fill", return_value=pipeline) as load,
-        ):
-            box_result = inpaint_with_configured_backend(
-                models, image, mask, "fill this area", route_key="generate_object_box"
-            )
-            mask_result = inpaint_with_configured_backend(
-                models, image, mask, "fill this area", route_key="generate_object_mask"
-            )
-
+        self.assertEqual(edit.call_args_list[1].args[:2], (models, image))
+        self.assertEqual(edit.call_args_list[1].args[2].getbbox(), (5, 5, 16, 16))
         self.assertEqual(
-            [call.args[0] for call in load.call_args_list],
-            ["org/custom-box-fill", "org/custom-mask-fill"],
+            edit.call_args_list[1].kwargs, {"mode": "regional", "padding": 0}
         )
-        self.assertEqual(box_result.size, image.size)
-        self.assertEqual(mask_result.size, image.size)
-        self.assertEqual(pipeline.call_count, 2)
-        kwargs = pipeline.call_args_list[0].kwargs
-        self.assertEqual(kwargs["image"].size, (32, 32))
-        self.assertEqual(kwargs["mask_image"].size, (32, 32))
-        self.assertEqual(kwargs["prompt"], "fill this area")
-        self.assertEqual(kwargs["guidance_scale"], 30)
-        self.assertEqual(kwargs["num_inference_steps"], 50)
 
-    def test_configured_generate_object_backend_preserves_stable_diffusion_default(self):
+    def test_phrase_guided_generation_uses_klein_regional_edit(self):
         image = Image.new("RGB", (20, 20), "blue")
-        mask = Image.new("L", image.size, 255)
         generated = Image.new("RGB", image.size, "red")
         models = ModelCache()
 
         with patch(
-            "inference.inpainting.inpaint_with_stable_diffusion",
+            "framework.tools.image_editing.generate_object.edit_masked_object",
             return_value=generated,
-        ) as stable_diffusion:
-            result = inpaint_with_configured_backend(
+        ) as edit:
+            result = generate_object(
                 models,
                 image,
-                mask,
-                "fill this area",
-                route_key="generate_object_mask",
+                "Add the object naturally.",
+                box=[2, 3, 12, 14],
+                phrase="a striped umbrella",
             )
 
         self.assertIs(result, generated)
-        stable_diffusion.assert_called_once()
-        self.assertIs(stable_diffusion.call_args.args[0], models)
-        self.assertEqual(stable_diffusion.call_args.kwargs["model_key"], "generate_object_mask")
-
-    def test_inpainting_routes_restore_source_image_dimensions(self):
-        image = Image.new("RGB", (80, 60), "blue")
-        mask = Image.new("L", image.size, 255)
-        generated = Image.new("RGB", (512, 512), "red")
-        stable_pipeline = Mock(return_value=Mock(images=[generated]))
-        gligen_pipeline = Mock(return_value=Mock(images=[generated]))
-        models = ModelCache()
-
-        with (
-            patch("inference.inpainting.device", return_value="cpu"),
-            patch(
-                "inference.inpainting._load_stable_diffusion",
-                return_value=stable_pipeline,
-            ),
-            patch(
-                "inference.inpainting._load_gligen",
-                return_value=gligen_pipeline,
-            ),
-        ):
-            filled = inpaint_with_stable_diffusion(
-                models, image, mask, "fill the region"
-            )
-            placed = inpaint_with_gligen(
-                models, image, "a photo", ["a ball"], [[10, 10, 30, 30]]
-            )
-
-        self.assertEqual(filled.size, image.size)
-        self.assertEqual(placed.size, image.size)
+        self.assertEqual(edit.call_args.args[:2], (models, image))
+        self.assertEqual(edit.call_args.args[2].getbbox(), (2, 3, 13, 15))
         self.assertEqual(
-            gligen_pipeline.call_args.kwargs["gligen_scheduled_sampling_beta"],
-            0.3,
+            edit.call_args.args[3],
+            "Add the object naturally. Place a striped umbrella inside the selected region.",
         )
         self.assertEqual(
-            gligen_pipeline.call_args.kwargs["gligen_boxes"],
-            [[0.125, 1 / 6, 0.375, 0.5]],
+            edit.call_args.kwargs, {"mode": "regional", "padding": 0}
         )
 
     def test_segment_object_text_returns_highest_scoring_mask(self):
@@ -434,7 +387,7 @@ class ModelConfigTests(unittest.TestCase):
         models = ModelCache()
 
         with patch(
-            "tools.image_editing.segment_object.segment_text",
+            "framework.tools.image_editing.segment_object.segment_text",
             return_value=[best, other],
         ) as segment:
             result = segment_object(models, image, prompt="  cat  ")
@@ -448,7 +401,7 @@ class ModelConfigTests(unittest.TestCase):
         image = Image.new("RGB", (20, 20), "blue")
 
         with (
-            patch("tools.image_editing.segment_object.segment_text", return_value=[]),
+            patch("framework.tools.image_editing.segment_object.segment_text", return_value=[]),
             self.assertRaisesRegex(ValueError, "No object matched"),
         ):
             segment_object(ModelCache(), image, prompt="cat")
@@ -474,9 +427,9 @@ class ModelConfigTests(unittest.TestCase):
             generate_object(models, image, "generate")
         with self.assertRaisesRegex(ValueError, "Provide a mask or a box"):
             generate_object(models, image, "generate", mask=mask, box=[0, 0, 10, 10])
-        with self.assertRaisesRegex(ValueError, "phrase requires a box"):
+        with self.assertRaisesRegex(ValueError, "requires a box"):
             generate_object(models, image, "generate", phrase="a cat")
-        with self.assertRaisesRegex(ValueError, "uses a box and phrase"):
+        with self.assertRaisesRegex(ValueError, "requires a box, not a mask"):
             generate_object(
                 models,
                 image,
@@ -489,12 +442,11 @@ class ModelConfigTests(unittest.TestCase):
     def test_default_edit_object_route_uses_flux2_klein(self):
         models = ModelCache()
         image = Image.new("RGB", (12, 12), "blue")
-        mask = Image.new("L", image.size, 255)
         backend = Mock()
         backend.edit.return_value = image
 
         with patch(
-            "inference.editing._load_flux2_klein_image_edit_backend",
+            "framework.inference.editing._load_flux2_klein_image_edit_backend",
             return_value=backend,
         ) as loader:
             result = semantic_edit_crop(models, image, "edit")
@@ -512,7 +464,7 @@ class ModelConfigTests(unittest.TestCase):
         backend.edit.return_value = image
 
         with patch(
-            "inference.editing._load_flux2_klein_image_edit_backend",
+            "framework.inference.editing._load_flux2_klein_image_edit_backend",
             return_value=backend,
         ) as loader:
             result = semantic_edit_crop(models, image, "edit")
@@ -529,7 +481,7 @@ class ModelConfigTests(unittest.TestCase):
         pipeline = Mock()
         pipeline.to.return_value = pipeline
         with (
-            patch("inference.editing.device", return_value="mps"),
+            patch("framework.inference.editing.device", return_value="mps"),
             patch(
                 "diffusers.Flux2KleinPipeline.from_pretrained",
                 return_value=pipeline,
@@ -553,7 +505,7 @@ class ModelConfigTests(unittest.TestCase):
         pipeline = Mock()
         pipeline.to.return_value = pipeline
         with (
-            patch("inference.editing.device", return_value="cuda"),
+            patch("framework.inference.editing.device", return_value="cuda"),
             patch(
                 "diffusers.Flux2KleinKVPipeline.from_pretrained",
                 return_value=pipeline,
@@ -572,7 +524,7 @@ class ModelConfigTests(unittest.TestCase):
         self.assertIs(backend.pipeline, pipeline)
 
     def test_flux2_klein_edit_uses_image_conditioned_four_step_inference(self):
-        from inference.editing import Flux2KleinImageEditBackend
+        from framework.inference.editing import Flux2KleinImageEditBackend
 
         source = Image.new("RGB", (16, 16), "blue")
         generated = Image.new("RGB", source.size, "red")
@@ -580,7 +532,7 @@ class ModelConfigTests(unittest.TestCase):
         pipeline.return_value.images = [generated]
         backend = Flux2KleinImageEditBackend(pipeline)
 
-        with patch("inference.editing.device", return_value="cpu"):
+        with patch("framework.inference.editing.device", return_value="cpu"):
             result = backend.edit(source, "add a hat")
 
         kwargs = pipeline.call_args.kwargs
@@ -591,7 +543,7 @@ class ModelConfigTests(unittest.TestCase):
         self.assertEqual(result.getpixel((0, 0)), (255, 0, 0))
 
     def test_flux2_klein_kv_edit_uses_supported_pipeline_arguments(self):
-        from inference.editing import Flux2KleinImageEditBackend
+        from framework.inference.editing import Flux2KleinImageEditBackend
 
         source = Image.new("RGB", (16, 16), "blue")
         generated = Image.new("RGB", source.size, "red")
@@ -599,7 +551,7 @@ class ModelConfigTests(unittest.TestCase):
         pipeline.return_value.images = [generated]
         backend = Flux2KleinImageEditBackend(pipeline, guidance_scale=None)
 
-        with patch("inference.editing.device", return_value="cpu"):
+        with patch("framework.inference.editing.device", return_value="cpu"):
             result = backend.edit(source, "add a hat")
 
         kwargs = pipeline.call_args.kwargs

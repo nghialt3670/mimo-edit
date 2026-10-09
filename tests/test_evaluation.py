@@ -15,20 +15,20 @@ from evaluation.common import (
     run_benchmark,
     select_reference_prompts,
 )
-from evaluation.refedit_metrics import (
+from evaluation.refedit_bench_metrics import (
     crop_pair_to_mask_roi,
-    decode_refedit_mask,
+    decode_refedit_bench_mask,
     summarize_viescore_scores,
 )
-from evaluation.refedit_viescore import (
+from evaluation.refedit_bench_viescore import (
     collect_saved_outputs,
-    evaluate_saved_refedit_outputs,
+    evaluate_saved_refedit_bench_outputs,
 )
 
 
 class RefEditMetricTests(unittest.TestCase):
     def test_decodes_serialized_polygons_into_binary_mask(self):
-        mask = decode_refedit_mask(
+        mask = decode_refedit_bench_mask(
             "[[2, 1, 5, 1, 5, 4, 2, 4]]",
             size=(8, 6),
         )
@@ -61,7 +61,7 @@ class RefEditMetricTests(unittest.TestCase):
                 [],
             )
         with self.assertRaisesRegex(ValueError, "at least three"):
-            decode_refedit_mask([[0, 0, 1, 1]], size=(4, 4))
+            decode_refedit_bench_mask([[0, 0, 1, 1]], size=(4, 4))
 
     def test_viescore_summary_averages_easy_and_hard_separately(self):
         summary = summarize_viescore_scores(
@@ -179,7 +179,7 @@ class RefEditMetricTests(unittest.TestCase):
             )
             scorer = FakeScorer()
 
-            rows, summary = evaluate_saved_refedit_outputs(
+            rows, summary = evaluate_saved_refedit_bench_outputs(
                 records,
                 output_dir=output_dir,
                 image_loader=FakeImageLoader(),
@@ -192,20 +192,23 @@ class RefEditMetricTests(unittest.TestCase):
             self.assertEqual(summary["hard"]["count"], 1)
             self.assertEqual(
                 len(
-                    (output_dir / "results" / "metrics" / "modified_viescore.jsonl")
+                    (output_dir / "metrics" / "modified_viescore.jsonl")
                     .read_text(encoding="utf-8")
                     .splitlines()
                 ),
                 3,
             )
+            self.assertFalse((output_dir / "results" / "metrics").exists())
 
 
 class _FakeAgent:
     last_instructions = None
     last_task = None
+    last_verbosity_level = None
 
     def __init__(self, **kwargs):
         type(self).last_instructions = kwargs.get("instructions")
+        type(self).last_verbosity_level = kwargs.get("verbosity_level")
         self.trajectory = [{"step": "observed"}]
         self.trajectory_text = "observed"
         self.raw_steps = [{"raw": "step"}]
@@ -249,8 +252,8 @@ class EvaluationOutputLayoutTests(unittest.TestCase):
             output_dir = Path(temporary_directory)
             with (
                 patch("evaluation.common.load_sample", return_value=sample),
-                patch("core.Agent", _FakeAgent),
-                patch("core.local_executor", return_value=object()),
+                patch("framework.core.Agent", _FakeAgent),
+                patch("framework.core.local_executor", return_value=object()),
             ):
                 results = run_benchmark(
                     [record],
@@ -274,9 +277,11 @@ class EvaluationOutputLayoutTests(unittest.TestCase):
             self.assertTrue((result_images / "000000_sample_001_source.png").is_file())
             self.assertTrue((result_images / "000000_sample_001_annotated.png").is_file())
             self.assertTrue(results_file.is_file())
+            self.assertFalse((output_dir / "metrics").exists())
 
             saved_result = json.loads(results_file.read_text(encoding="utf-8"))
             self.assertEqual(results[0]["status"], "completed")
+            self.assertEqual(_FakeAgent.last_verbosity_level, 0)
             self.assertEqual(results[0]["random_seed"], 2718)
             self.assertEqual(_FakeAgent.last_task, "Make it red.")
             self.assertNotIn("Reference", _FakeAgent.last_task)
@@ -328,6 +333,17 @@ class EvaluationOutputLayoutTests(unittest.TestCase):
             }
             calls = 0
 
+            class RecordingProgress:
+                def __init__(self, iterable):
+                    self.iterable = iterable
+                    self.postfixes = []
+
+                def __iter__(self):
+                    return iter(self.iterable)
+
+                def set_postfix(self, **values):
+                    self.postfixes.append(values)
+
             def run_one(*args, **kwargs):
                 nonlocal calls
                 calls += 1
@@ -337,9 +353,14 @@ class EvaluationOutputLayoutTests(unittest.TestCase):
                     self.assertEqual(json.loads(lines[0])["sample_id"], "first")
                 return first_result if calls == 1 else second_result
 
-            with patch("evaluation.common.run_one", side_effect=run_one):
+            progress = RecordingProgress([0, 1])
+            with (
+                patch("evaluation.common.run_one", side_effect=run_one),
+                patch("evaluation.common.tqdm", return_value=progress) as tqdm_mock,
+            ):
+                tqdm_mock.write = lambda *_args, **_kwargs: None
                 results = run_benchmark(
-                    [{}, {}],
+                    [{"sample_id": "first"}, {"sample_id": "second"}],
                     [0, 1],
                     benchmark="refedit_bench",
                     output_dir=output_dir,
@@ -352,6 +373,15 @@ class EvaluationOutputLayoutTests(unittest.TestCase):
             self.assertEqual(len(lines), 2)
             self.assertEqual([json.loads(line)["sample_id"] for line in lines], ["first", "second"])
             self.assertEqual(results, [first_result, second_result])
+            self.assertEqual(
+                progress.postfixes,
+                [
+                    {"sample": "first", "status": "running", "refresh": True},
+                    {"sample": "first", "status": "completed", "refresh": False},
+                    {"sample": "second", "status": "running", "refresh": True},
+                    {"sample": "second", "status": "failed", "refresh": False},
+                ],
+            )
 
     def test_agent_task_passes_exactly_one_visual_prompt_per_reference(self):
         sample = {
@@ -412,6 +442,48 @@ class EvaluationOutputLayoutTests(unittest.TestCase):
             [ref["selected_prompt"] for ref in first["references"]],
             [ref["selected_prompt"] for ref in second["references"]],
         )
+
+    def test_compbench_add_destinations_only_sample_boxes(self):
+        image = Image.new("RGB", (8, 8), "blue")
+
+        class FakeImageLoader:
+            def load_pair(self, record):
+                return image, None
+
+        for task_name in ("add", "multi_object_add"):
+            with self.subTest(task=task_name):
+                sample = load_sample(
+                    {
+                        "sample_id": "sample-001",
+                        "metadata": {"task": task_name},
+                        "references": [
+                            {
+                                "token": "<v1>",
+                                "span": "the upper left",
+                                "visual_prompts": {
+                                    "box": {"xyxy": [1, 2, 6, 7]},
+                                    "point": {"xy": [3, 4]},
+                                    "scribble": {"strokes": [[[2, 3], [4, 5]]]},
+                                },
+                            }
+                        ],
+                    },
+                    benchmark="compbench",
+                    image_loader=FakeImageLoader(),
+                )
+                select_reference_prompts(sample, seed=123)
+                task, objects = build_agent_task(sample)
+                context = build_agent_context(sample)
+
+                self.assertIsNone(task)
+                self.assertIn("box_0", objects)
+                self.assertNotIn("point_0", objects)
+                self.assertNotIn("scribble_0", objects)
+                self.assertEqual(
+                    sample["references"][0]["selected_prompt"]["type"], "box"
+                )
+                self.assertIn("not an entity to select", context)
+                self.assertIn("directly as the box for generate_object", context)
 
     def test_sample_loading_excludes_masks_and_crops_but_keeps_grounding_and_prompts(self):
         image = Image.new("RGB", (8, 8), "blue")

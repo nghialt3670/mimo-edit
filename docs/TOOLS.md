@@ -1,23 +1,23 @@
 # Image-editing tools
 
 This document describes the tools registered by
-[`src/tools/image_editing/`](../src/tools/image_editing/) and built by
-[`image_editing_tools`](../src/tools/__init__.py). The registry currently exposes
+[`src/framework/tools/image_editing/`](../src/framework/tools/image_editing/) and built by
+[`image_editing_tools`](../src/framework/tools/__init__.py). The registry currently exposes
 11 tools:
 
 | Tool | Purpose | Default backbone |
 | --- | --- | --- |
-| [`segment_object`](../src/tools/image_editing/segment_object.py) | Find one object and return its mask | SAM 3 |
-| [`edit_object`](../src/tools/image_editing/edit_object.py) | Semantically edit one masked object | FLUX.2 Klein 4B |
-| [`remove_object`](../src/tools/image_editing/remove_object.py) | Remove one masked object | ObjectClear |
-| [`replace_object`](../src/tools/image_editing/replace_object.py) | Remove an object, then paste a replacement image | ObjectClear + Pillow |
-| [`generate_object`](../src/tools/image_editing/generate_object.py) | Inpaint a region or place a phrase in a box | Stable Diffusion Inpainting or GLIGEN |
-| [`move_object`](../src/tools/image_editing/move_object.py) | Move one object to a point or box | ObjectClear + Pillow |
-| [`shift_object`](../src/tools/image_editing/shift_object.py) | Translate one object by an offset | ObjectClear + Pillow |
-| [`rotate_object`](../src/tools/image_editing/rotate_object.py) | Rotate one object | ObjectClear + Pillow |
-| [`scale_object`](../src/tools/image_editing/scale_object.py) | Resize one object around its center | ObjectClear + Pillow |
-| [`flip_object`](../src/tools/image_editing/flip_object.py) | Flip one object horizontally or vertically | ObjectClear + Pillow |
-| [`apply_filter`](../src/tools/image_editing/apply_filter.py) | Apply a visual filter globally or to one object | Pillow; no learned model |
+| [`segment_object`](../src/framework/tools/image_editing/segment_object.py) | Find one object and return its mask | SAM 3 |
+| [`edit_object`](../src/framework/tools/image_editing/edit_object.py) | Semantically edit one masked object | FLUX.2 Klein 4B |
+| [`remove_object`](../src/framework/tools/image_editing/remove_object.py) | Remove one masked object | ObjectClear |
+| [`replace_object`](../src/framework/tools/image_editing/replace_object.py) | Remove an object, then paste a replacement image | ObjectClear + Pillow |
+| [`generate_object`](../src/framework/tools/image_editing/generate_object.py) | Generate or transform content in a selected region | FLUX.2 Klein 4B |
+| [`move_object`](../src/framework/tools/image_editing/move_object.py) | Move one object to a point or box | ObjectClear + Pillow |
+| [`shift_object`](../src/framework/tools/image_editing/shift_object.py) | Translate one object by an offset | ObjectClear + Pillow |
+| [`rotate_object`](../src/framework/tools/image_editing/rotate_object.py) | Rotate one object | ObjectClear + Pillow |
+| [`scale_object`](../src/framework/tools/image_editing/scale_object.py) | Resize one object around its center | ObjectClear + Pillow |
+| [`flip_object`](../src/framework/tools/image_editing/flip_object.py) | Flip one object horizontally or vertically | ObjectClear + Pillow |
+| [`apply_filter`](../src/framework/tools/image_editing/apply_filter.py) | Apply a visual filter globally or to one object | Pillow; no learned model |
 
 The entries in the table are the default backbones. Model IDs can be overridden
 as described in [Model configuration](#model-configuration).
@@ -38,11 +38,15 @@ as described in [Model configuration](#model-configuration).
   they do not automatically identify the object from a text description.
 - Model-backed tools load pipelines lazily. The cache is shared by the tool set
   created in one `image_editing_tools()` call, avoiding repeated pipeline loads
-  across calls.
+  across calls. To download and load the default checkpoints before inference,
+  run the [model warmup notebook](../src/notebooks/model_warmup.ipynb); it loads
+  each model sequentially and releases it before moving on.
 
 ## Tool interfaces and behavior
 
 ### `segment_object`
+
+**Backbone:** SAM 3.
 
 **Inputs**
 
@@ -150,42 +154,31 @@ pasting use Pillow.
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `image` | Image | Yes | Source image. |
-| `prompt` | String | Yes | Description of content to generate or region fill. |
-| `mask` | Image or null | No | White region to inpaint. |
-| `box` | Array or null | No | Pixel region `[x1, y1, x2, y2]`. |
-| `phrase` | String or null | No | Object description for GLIGEN placement. |
+| `prompt` | String | Yes | Description of the requested content or transformation. |
+| `mask` | Image or null | No | White pixels select the region to edit. |
+| `box` | Array or null | No | Pixel region `[x1, y1, x2, y2]` to edit. |
+| `phrase` | String or null | No | Object description for phrase-guided placement within `box`. |
 
 There are two mutually exclusive routes:
 
-1. **Inpainting:** supply exactly one of `mask` or `box`, and omit `phrase`.
-   A box is converted to a rectangular mask. The prompt describes what should
-   fill the selected region. The mask and box routes independently default to
-   Stable Diffusion Inpainting; either route can use FLUX.1 Fill [dev].
+1. **Region edit/generation:** supply exactly one of `mask` or `box`, and omit
+   `phrase`. A box is converted to a rectangular mask. FLUX.2 Klein edits a
+   crop around the selected region using the prompt, then composites the edit
+   into the source.
 2. **Phrase-guided placement:** supply `box` and `phrase`, and omit `mask`.
-   GLIGEN places the described object in the specified box, conditioned on the
-   general `prompt` and phrase. Uses the box-and-phrase GLIGEN pipeline.
+   The phrase is included in the prompt and FLUX.2 Klein edits the destination
+   region using the same regional-edit path.
 
 The general `prompt` must be non-empty. A `phrase` without a box, a mask paired
 with a phrase, both mask and box without a phrase, or neither mask nor box
 raises an error.
 
-**Backbones**
+**Backbone**
 
-- Mask inpainting: `runwayml/stable-diffusion-inpainting` by default; 50 steps,
-  guidance scale `7.5`, seed `42`.
-- Box inpainting: `runwayml/stable-diffusion-inpainting` by default; 50 steps,
-  guidance scale `7.5`, seed `42`.
-- FLUX.1 Fill [dev] (`black-forest-labs/FLUX.1-Fill-dev`) is selectable
-  independently for the mask and box inpainting routes; it uses 50 steps,
-  guidance scale `30`, seed `42`, and resizes inference dimensions to multiples
-  of 16. Its checkpoint is under the FLUX.1 [dev] non-commercial license.
-- PowerPaint v2.1 is not currently supported; its upstream implementation
-  requires custom BrushNet modules and older pinned dependencies.
-- Phrase and box: `masterful/gligen-1-4-inpainting-text-box` by default;
-  normalized box coordinates, 50 steps, scheduled-sampling beta `0.3`, seed
-  `42`.
-
-Both routes resize the returned image to the input image dimensions if needed.
+`generate_object` uses the same FLUX.2 Klein backend as `edit_object`, with
+four image-conditioned denoising steps. The selected mask or box uses regional
+mode with zero padding, so the edit area is not expanded beyond the supplied
+selection; content outside its feathered composite boundary is preserved.
 
 ### `move_object`
 
@@ -280,22 +273,17 @@ Unsupported filter names and values outside `[-1, 1]` raise an error.
 Pass a `ModelConfig` when building the tools to override default model IDs:
 
 ```python
-from tools import ModelConfig, image_editing_tools
+from framework import ModelConfig, image_editing_tools
 
 tools = image_editing_tools(
     model_config=ModelConfig(
         model_ids={
             "edit_object": "black-forest-labs/FLUX.2-klein-9b-kv",
             "segment_object": "facebook/sam3",
-            "generate_object_mask": "black-forest-labs/FLUX.1-Fill-dev",
-            "generate_object_box": "black-forest-labs/FLUX.1-Fill-dev",
-            "generate_object_gligen": "masterful/gligen-1-4-inpainting-text-box",
             "remove_object": "jixin0101/ObjectClear",
         },
         backends={
             "edit_object": "flux2-klein-9b-kv",
-            "generate_object_mask": "flux-fill",
-            "generate_object_box": "flux-fill",
         },
     )
 )
@@ -304,14 +292,8 @@ tools = image_editing_tools(
 Other supported model-ID override keys are `flip_object`, `move_object`,
 `replace_object`, `rotate_object`, `scale_object`, and `shift_object`; each
 defaults to the ObjectClear checkpoint. `apply_filter` has no model override
-because it does not load a model. `generate_object` and `generate_object_gligen`
-are the legacy shared inpainting ID and GLIGEN ID. Prefer the route-specific
-`generate_object_mask` and `generate_object_box` ID keys when those routes use
-different models; route-specific IDs take precedence over the legacy shared ID.
-The supported `backends` keys are `edit_object` (`flux2-klein-4b` or
-`flux2-klein-9b-kv`), `generate_object_mask`, and `generate_object_box` (each
-`stable-diffusion` or `flux-fill`). The GLIGEN phrase+box route remains separate
-and unchanged.
+because it does not load a model. `generate_object` shares the `edit_object`
+model ID and backend; configure Klein once under `edit_object`.
 
 At runtime, the model device is selected in this order: Apple MPS when
 available, otherwise CUDA, otherwise CPU. Pipelines are lazy-loaded and cached
@@ -320,7 +302,7 @@ by pipeline and model ID in a `ModelCache`; tools constructed together by
 reuse, pass a `ModelCache` as the first argument:
 
 ```python
-from tools import ModelCache, ModelConfig, image_editing_tools
+from framework import ModelCache, ModelConfig, image_editing_tools
 
 cache = ModelCache(ModelConfig(model_ids={"segment_object": "facebook/sam3"}))
 tools = image_editing_tools(model_cache=cache)

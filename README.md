@@ -1,9 +1,9 @@
 # MMEdit Framework
 
-A multi-turn image-editing agent built on `smolagents`, with Pillow images and masks as its entity representation. The project has three packages:
+A multi-turn image-editing agent built on `smolagents`, with Pillow images and masks as its entity representation. Its installable packages live under `src/`: the editing framework is `framework`, annotations are `annotation`, benchmark evaluation is `evaluation`, and plotting/browser helpers are `visualization`. Notebook work lives in `src/notebooks`; maintenance commands live in `src/scripts`.
 
-- `core` owns agent orchestration and conversation state.
-- `tools` owns registered editing operations and their Pillow-facing APIs.
+- `framework.core` owns agent orchestration and conversation state.
+- `framework.tools` owns registered editing operations and their Pillow-facing APIs.
 
 ## Install
 
@@ -13,15 +13,14 @@ Install the framework and its optional model stack:
 uv sync --extra models
 ```
 
-Models load on first use. Gated Hugging Face models require `HF_TOKEN`.
+Models load on first use. Run the [model warmup notebook](./src/notebooks/model_warmup.ipynb) before inference to download and load the default tool backbones in sequence; weights remain in the Hugging Face cache, while inference still loads model objects into its own kernel. Gated Hugging Face models require `HF_TOKEN`.
 
 ## Use the Tools In-Process
 
 Tools invoke the model pipelines directly; there is no inference service or separate server process.
 
 ```python
-from core import Agent
-from tools import image_editing_tools
+from framework import Agent, image_editing_tools
 
 tools = image_editing_tools()
 agent = Agent(model=model, tools=tools)
@@ -33,7 +32,7 @@ result = agent.send(
 edited = result.message.objects[0]
 ```
 
-Pass Pillow `Image` instances and grayscale Pillow masks as objects. White mask pixels select the entity. Object-targeting tools accept one mask/object per call; issue another tool call for each additional object. `segment_object` accepts exactly one text prompt, point, box, or scribble and returns one mask; text prompts return the highest-scoring match. `generate_object` fills or generates content in one masked or boxed region, and can also place one phrase in a box with GLIGEN. Models load lazily and are shared through the tool set's model cache.
+Pass Pillow `Image` instances and grayscale Pillow masks as objects. White mask pixels select the entity. Object-targeting tools accept one mask/object per call; issue another tool call for each additional object. `segment_object` accepts exactly one text prompt, point, box, or scribble and returns one mask; text prompts return the highest-scoring match. `generate_object` generates or transforms content in a masked or boxed region with FLUX.2 Klein, optionally guided by a phrase. Models load lazily and are shared through the tool set's model cache.
 
 For every registered image-editing tool's inputs, behavior, and default backbone, see the detailed [tool reference](./docs/TOOLS.md).
 
@@ -44,12 +43,12 @@ ObjectClear is provided under its upstream S-Lab license, which restricts use to
 Model selection is independent of tool registration. `edit_object` defaults to FLUX.2 Klein 4B:
 
 ```python
-from tools import ModelConfig, image_editing_tools
+from framework import ModelConfig, image_editing_tools
 
 tools = image_editing_tools()
 ```
 
-`edit_object` uses only the FLUX.2 Klein 4B Diffusers pipeline, `black-forest-labs/FLUX.2-klein-4B`. It conditions on the source crop and edit prompt and runs four denoising steps. The model card reports approximately 13 GB VRAM for GPU use; Apple Silicon uses MPS with float16, but speed and memory usage depend on the Mac. `generate_object` uses GLIGEN for phrase-plus-box placement with scheduled-sampling beta 0.3, and Stable Diffusion inpainting for mask/box fills. `model_ids` can override checkpoint IDs by tool name (the GLIGEN route uses `generate_object_gligen`). Other tools use ObjectClear for removal/transforms and SAM3 for segmentation. For custom/shared caches, pass `ModelCache(ModelConfig(...))` as the first argument to `image_editing_tools`. Review each checkpoint's license before use.
+`edit_object` and `generate_object` use FLUX.2 Klein 4B (`black-forest-labs/FLUX.2-klein-4B`) by default. Both condition on image content and an edit prompt and run four denoising steps; `generate_object` edits a crop around the selected region and composites the result back into the image. The model card reports approximately 13 GB VRAM for GPU use; Apple Silicon uses MPS with float16, but speed and memory usage depend on the Mac. Both tools share the `edit_object` model/backend configuration. Other tools use ObjectClear for removal/transforms and SAM3 for segmentation. For custom/shared caches, pass `ModelCache(ModelConfig(...))` as the first argument to `image_editing_tools`. Review each checkpoint's license before use.
 
 `apply_filter` works on the full image by default. Pass a mask to filter only one selected object; the result is blended softly at the mask edge while pixels outside the mask remain unchanged.
 
@@ -65,9 +64,13 @@ See the [FLUX.2 Klein 4B model card](https://huggingface.co/black-forest-labs/FL
 
 ## Benchmark the Agent
 
-Benchmark helpers live in [`evaluation/common.py`](./evaluation/common.py). Use the dedicated [CompBench notebook](./evaluation/compbench.ipynb) or [RefEdit-Bench notebook](./evaluation/refedit_bench.ipynb) to load the corresponding JSONL annotations and fetch `hf://` images using their original split row indices. The agent receives the benchmark instruction and one box, point, or scribble prompt per reference, selected reproducibly from the available prompt types. Both notebooks set `RANDOM_SEED = 42`; the selection uses that seed together with the sample ID, so a sample keeps the same prompt selection when run alone, in a subset, or in a full run. Change `RANDOM_SEED` to explore a different selection. The seed is recorded in each result row and `raw.json`. The agent then uses `segment_object` to produce its own mask. Annotation masks and crops are not used. The RefEdit-Bench notebook runs the full annotation set by default; change `SAMPLE_INDICES` in its run cell to select a subset. The initial user observation contains only the benchmark instruction; reference descriptions, selector mappings, and editing guidance are passed separately as agent instructions. Each sample log directory includes trajectory/raw JSON and a `variables.json` snapshot of the agent namespace; images, masks, arrays, tensors, and byte values are saved as files under `debug_assets/` and referenced from that manifest. Edited/source/annotated/target images go to `results/images/`, with the run summary in `results/results.jsonl`. Install with `uv sync --extra models --extra benchmark`; by default, the notebooks read `~/Datasets/MMEdit/compbench/annotations.jsonl` and `~/Datasets/MMEdit/refedit-bench/annotations.jsonl`, respectively. Override with `MMEDIT_COMPBENCH_ANNOTATIONS` or `MMEDIT_REFEDIT_ANNOTATIONS`, and configure `MMEDIT_API_KEY` (or `GOOGLE_API_KEY`) before running. The notebooks report execution status and timing; compare saved outputs with benchmark targets separately for image-quality scoring.
+Benchmark helpers live in [`src/evaluation/`](./src/evaluation/). The [CompBench inference](./src/notebooks/compbench_inference.ipynb) and [RefEdit-Bench inference](./src/notebooks/refedit_bench_inference.ipynb) notebooks use shared path/configuration and OpenAI-compatible model setup from `evaluation.notebook`, then load `hf://` images using their original dataset row indices. They read annotation outputs generated by the project: `.out/annotation/compbench/compbench_local_multiobject_mixed.jsonl` and `.out/annotation/refedit_bench/refedit_bench_mixed.jsonl`; run the corresponding annotation notebook first. Optional `MMEDIT_COMPBENCH_ANNOTATIONS` and `MMEDIT_REFEDIT_BENCH_ANNOTATIONS` variables can override those files. Each inference execution creates a separate `.out/evaluation/<benchmark>/run_<timestamp>/` directory containing `logs/` and `results/`; metrics are created separately under the same run only when the metrics workflow runs. Both run all annotations by default and display a concise tqdm progress bar; use [CompBench debug](./src/notebooks/compbench_debug.ipynb) to inspect one representative sample from each task type. Visual prompts are selected reproducibly with `RANDOM_SEED = 42`; selection combines the seed with each sample ID so a sample keeps its prompt choice across individual, subset, and full runs. Install with `uv sync --extra models --extra benchmark`, copy `.env.example` to `.env`, then set `MMEDIT_API_KEY` or `GOOGLE_API_KEY`.
 
-Use the standalone [Modified VIEScore notebook](./evaluation/refedit_viescore.ipynb) to score existing RefEdit outputs without rerunning the editing agent. Its implementation lives in [`evaluation/refedit_viescore.py`](./evaluation/refedit_viescore.py). By default, it loads RefEdit outputs from `outputs/evaluation/refedit_bench`; set `MMEDIT_REFEDIT_OUTPUT_DIR` to override the output directory. The RefEdit benchmark notebook uses the same default output location. Scoring uses each annotation's original `metadata.edit_instruction_single`, decodes the RefEdit GT polygon mask, and applies the same zero-padding tight mask-bounding-box crop to source and generated images before calling VIEScore `task="tie"` with the GPT-4o API model. The current upstream `gpt4o` backbone defaults its API model name to GPT-4.1, so the evaluator explicitly sets the API model identifier to `gpt-4o`. To enable the optional scorer, check out [Step1X-Edit](https://github.com/stepfun-ai/Step1X-Edit), install its GEdit-Bench VIEScore dependencies, set `VIESCORE_ROOT` to that checkout's `GEdit-Bench` directory, and set `VIESCORE_KEY_PATH` to a local text file containing only the OpenAI API key on its first line. Do not commit the key file. The evaluator scores completed outputs from `results/results.jsonl` and also scans `results/images/*_output.png` so it can recover outputs omitted when that JSONL was overwritten by a later subset run. It saves per-sample scores to `results/metrics/modified_viescore.jsonl` and reports SC/PQ/O means separately for Easy and Hard; unchanged output files reuse cached scores. To run the same evaluator from the repository root without opening a notebook, run `uv run python -m evaluation.refedit_viescore`.
+The standalone [RefEdit-Bench metrics notebook](./src/notebooks/refedit_bench_metrics.ipynb) scores a selected saved run without rerunning the agent; it defaults to the latest run, or can select one with `MMEDIT_REFEDIT_BENCH_RUN`. Per-sample scores are written to `<run>/metrics/modified_viescore.jsonl`, separate from `<run>/results/`. Its implementation is in [`src/evaluation/refedit_bench_viescore.py`](./src/evaluation/refedit_bench_viescore.py). It uses the original `metadata.edit_instruction_single`, the GT polygon mask, and a tight shared ROI crop before scoring with VIEScore `task="tie"` and GPT-4o. Configure `VIESCORE_ROOT` and `VIESCORE_KEY_PATH` to enable scoring; keep the key file local and uncommitted. Run the evaluator from the repository root with `uv run python -m evaluation.refedit_bench_viescore`.
+
+## Annotation and Visualization
+
+The annotation pipeline is available as `annotation`; its benchmark notebooks share settings, Hugging Face loading, schema checks, resumable conversion, and audit handling through `annotation.workflows`. Visualization/browser helpers are in `visualization`. Use `uv sync --extra visualize` for notebook plotting dependencies. Run annotations with the [CompBench](./src/notebooks/compbench_annotation.ipynb), [MagicBrush](./src/notebooks/magicbrush_annotation.ipynb), or [RefEdit-Bench](./src/notebooks/refedit_bench_annotation.ipynb) annotation notebook. Copy `.env.example` to `.env` and set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`); optional settings control limits, streaming, grounding thresholds, split, and output location. Explore annotations with the matching [CompBench](./src/notebooks/compbench_visualization.ipynb), [MagicBrush](./src/notebooks/magicbrush_visualization.ipynb), or [RefEdit-Bench](./src/notebooks/refedit_bench_visualization.ipynb) visualization notebook. [Annotation statistics](./src/notebooks/annotations_statistics.ipynb) summarizes the generated annotations; [tools_demo.ipynb](./src/notebooks/tools_demo.ipynb) demonstrates the editing tools. Generated JSONL/assets are kept locally in `.out/annotation/` (ignored by Git). Sync audit entries against successful records and sort by original dataset row with `uv run python -m scripts.sync_annotations compbench` (also accepts `magicbrush` and `refedit_bench`); it previews by default, and `--apply` writes both changes. Backfill visual prompt geometry for a benchmark with `uv run python -m scripts.backfill_visual_prompts compbench` (also accepts `magicbrush` and `refedit_bench`).
 
 ## Register a Tool
 
@@ -75,7 +78,7 @@ Register a Python handler with its model-facing schema:
 
 ```python
 from PIL import ImageOps
-from tools import register_tool
+from framework.tools import register_tool
 
 @register_tool(
     "invert_image",

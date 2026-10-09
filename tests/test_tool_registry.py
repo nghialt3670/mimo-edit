@@ -1,6 +1,6 @@
 import unittest
 
-from tools.registry import ToolRegistry
+from framework.tools.registry import ToolRegistry
 
 
 class ToolRegistryDispatchTests(unittest.TestCase):

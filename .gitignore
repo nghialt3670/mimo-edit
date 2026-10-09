@@ -13,7 +13,7 @@ wheels/
 .env
 
 # Outputs
-outputs/
+.out
 
 # VieScore key
 .viescore.key
