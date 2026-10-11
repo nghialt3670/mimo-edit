@@ -6,17 +6,17 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from PIL import Image
 from tqdm.auto import tqdm
 
 from evaluation.common import HFImageLoader, read_jsonl
-from evaluation.notebook import resolve_run_directory
-from evaluation.refedit_bench_metrics import (
+from evaluation.metrics import (
     crop_pair_to_mask_roi,
     summarize_viescore_scores,
 )
+from evaluation.notebook import resolve_run_directory
 
 
 def _safe_sample_id(sample_id: Any) -> str:
@@ -27,6 +27,8 @@ def collect_saved_outputs(
     records: list[dict[str, Any]],
     results_path: Path,
     images_dir: Path,
+    *,
+    prompt_mode: Literal["text", "mixed"] | None = None,
 ) -> list[dict[str, Any]]:
     """Collect completed results and output images absent from a replaced summary."""
     outputs: dict[int, dict[str, Any]] = {}
@@ -34,6 +36,11 @@ def collect_saved_outputs(
         for result in read_jsonl(results_path):
             if result.get("status") != "completed":
                 continue
+            if prompt_mode is not None and result.get("prompt_mode") != prompt_mode:
+                raise ValueError(
+                    f"Expected {prompt_mode!r} results in {results_path}, got "
+                    f"{result.get('prompt_mode')!r} for {result.get('sample_id')!r}"
+                )
             index = result.get("annotation_index")
             if not isinstance(index, int) or not 0 <= index < len(records):
                 raise ValueError(
@@ -126,12 +133,17 @@ def evaluate_saved_refedit_bench_outputs(
     scorer: Any | None = None,
     viescore_root: Path | None = None,
     key_path: Path | None = None,
+    prompt_mode: Literal["text", "mixed"] = "mixed",
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, float | int]]]:
     """Score one RefEdit run, including images omitted from results.jsonl."""
+    if prompt_mode not in ("text", "mixed"):
+        raise ValueError(f"Unsupported prompt mode: {prompt_mode!r}")
     output_dir = output_dir.expanduser().resolve()
     results_path = output_dir / "results" / "results.jsonl"
     images_dir = output_dir / "results" / "images"
-    saved_outputs = collect_saved_outputs(records, results_path, images_dir)
+    saved_outputs = collect_saved_outputs(
+        records, results_path, images_dir, prompt_mode=prompt_mode
+    )
     if image_loader is None:
         image_loader = HFImageLoader()
     if scorer is None:
@@ -161,6 +173,7 @@ def evaluate_saved_refedit_bench_outputs(
                 cached.get("output_size_bytes"),
                 cached.get("output_mtime_ns"),
                 cached.get("instruction"),
+                cached.get("prompt_mode"),
             )
             cached_scores[cache_key] = cached
 
@@ -192,6 +205,7 @@ def evaluate_saved_refedit_bench_outputs(
             output_stat.st_size,
             output_stat.st_mtime_ns,
             instruction,
+            prompt_mode,
         )
         if cache_key in cached_scores:
             score_row = cached_scores[cache_key]
@@ -226,6 +240,7 @@ def evaluate_saved_refedit_bench_outputs(
                 "sample_id": record["sample_id"],
                 "annotation_index": annotation_index,
                 "category": category,
+                "prompt_mode": prompt_mode,
                 "instruction": instruction,
                 "output_path": str(output_path),
                 "output_size_bytes": output_stat.st_size,
@@ -235,7 +250,7 @@ def evaluate_saved_refedit_bench_outputs(
                 "pq": float(scores[1]),
                 "o": float(scores[2]),
             }
-        summarize_viescore_scores([score_row])
+        summarize_viescore_scores([score_row], prompt_mode=prompt_mode)
         metric_rows.append(score_row)
         metric_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = metric_path.with_suffix(".jsonl.tmp")
@@ -245,7 +260,7 @@ def evaluate_saved_refedit_bench_outputs(
         )
         temporary_path.replace(metric_path)
 
-    summary = summarize_viescore_scores(metric_rows)
+    summary = summarize_viescore_scores(metric_rows, prompt_mode=prompt_mode)
     print(
         f"Scored {len(metric_rows)} saved RefEdit outputs "
         f"({sum(row['category'] == 'easy' for row in metric_rows)} easy, "
@@ -255,7 +270,7 @@ def evaluate_saved_refedit_bench_outputs(
     return metric_rows, summary
 
 
-def main() -> None:
+def main(prompt_mode: Literal["text", "mixed"] | None = None) -> None:
     from dotenv import load_dotenv
 
     load_dotenv(Path(__file__).resolve().parents[2] / ".env")
@@ -276,11 +291,18 @@ def main() -> None:
         "--output-dir",
         type=Path,
         default=Path(".out/evaluation/refedit_bench"),
-        help="Benchmark output root containing run_<timestamp> directories.",
+        help="Benchmark output root; the selected prompt mode is appended.",
     )
+    if prompt_mode is None:
+        parser.add_argument(
+            "--prompt-mode",
+            choices=("text", "mixed"),
+            default=os.environ.get("MMEDIT_REFEDIT_BENCH_PROMPT_MODE", "mixed"),
+            help="Inference prompt mode whose saved run should be scored.",
+        )
     parser.add_argument(
         "--run",
-        default=os.environ.get("MMEDIT_REFEDIT_BENCH_RUN") or None,
+        default=None,
         help="Run directory name to score; defaults to the latest completed run.",
     )
     parser.add_argument(
@@ -294,14 +316,22 @@ def main() -> None:
         default=Path(os.environ.get("VIESCORE_KEY_PATH", "")).expanduser(),
     )
     args = parser.parse_args()
+    selected_mode = prompt_mode or args.prompt_mode
+    if selected_mode not in ("text", "mixed"):
+        raise ValueError(f"Unsupported prompt mode: {selected_mode!r}")
+    run_env = f"MMEDIT_REFEDIT_BENCH_{selected_mode.upper()}_RUN"
+    run_name = os.environ.get(run_env) or os.environ.get("MMEDIT_REFEDIT_BENCH_RUN")
     records = list(read_jsonl(args.annotations))
     if not records:
         raise ValueError(f"No RefEdit annotations found in {args.annotations}")
     _, summary = evaluate_saved_refedit_bench_outputs(
         records,
-        output_dir=resolve_run_directory(args.output_dir, args.run),
+        output_dir=resolve_run_directory(
+            args.output_dir / selected_mode, args.run or run_name
+        ),
         viescore_root=args.viescore_root,
         key_path=args.key_path,
+        prompt_mode=selected_mode,
     )
     print(json.dumps(summary, indent=2))
 

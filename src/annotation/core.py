@@ -8,7 +8,14 @@ from PIL import Image, ImageChops
 
 from .grounder import Grounder, mask_bbox, mask_components
 from .parser import Parser
-from .schema import AnnotationRecord, ParsedEntity, Reference, Region, Sample
+from .schema import (
+    AnnotationRecord,
+    ParsedEntity,
+    ParsedInstruction,
+    Reference,
+    Region,
+    Sample,
+)
 
 TOKEN_RE = re.compile(r"<v\d+>")
 WORD_RE = re.compile(r"\b[\w'-]+\b")
@@ -24,7 +31,30 @@ class AnnotationError(RuntimeError):
 
 
 class NoReferenceError(AnnotationError):
-    pass
+    def __init__(
+        self,
+        message: str,
+        *,
+        parse_attempts: list[dict[str, object]] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.parse_attempts = parse_attempts or []
+
+
+def _parse_attempt_details(mode: str, parsed: ParsedInstruction) -> dict[str, object]:
+    entities = parsed.entities
+    return {
+        "mode": mode,
+        "entity_count": len(entities),
+        "entities": [
+            {
+                "span": entity.span,
+                "role": entity.role,
+                "present_in_source": entity.present_in_source,
+            }
+            for entity in entities
+        ],
+    }
 
 
 def _recover_span(text: str, span: str) -> tuple[int, int] | None:
@@ -235,6 +265,7 @@ class Annotator:
     parser: Parser
     grounder: Grounder
     min_confidence: float = 0.0
+    refedit_mask_from_start: bool = False
 
     def annotate(self, sample: Sample) -> AnnotationRecord:
         parser_instruction = sample.parser_instruction or sample.instruction
@@ -256,27 +287,56 @@ class Annotator:
         )
         mask_guidance_used = False
         mask_guidance_reasons: list[str] = []
+        parse_attempts: list[dict[str, object]] = []
         component_regions: dict[tuple[int, int], tuple[Region, Image.Image]] = {}
         if masked_reference_only:
             if sample.mask is None or sample.mask.getbbox() is None:
                 raise AnnotationError("refedit_bench_mask_missing_or_empty")
-            parsed = self.parser.parse(parser_instruction)
-            entities = [e for e in parsed.entities if e.present_in_source]
-            if parsed.mask_guidance_needed:
-                mask_guidance_reasons.append("parser_flag")
-            if len(entities) != 1:
-                mask_guidance_reasons.append("reference_count")
-            if not _single_span_is_unambiguous(parser_instruction, entities):
-                mask_guidance_reasons.append("span_alignment")
-            if mask_guidance_reasons:
+            if self.refedit_mask_from_start:
                 parsed = self.parser.parse(
                     parser_instruction,
                     image=sample.image,
                     mask=sample.mask,
                     masked_reference_only=True,
                 )
+                parse_attempts.append(_parse_attempt_details("masked", parsed))
                 entities = [e for e in parsed.entities if e.present_in_source]
                 mask_guidance_used = True
+                mask_guidance_reasons.append("mask_from_start")
+            else:
+                parsed = self.parser.parse(parser_instruction)
+                text_parsed = parsed
+                parse_attempts.append(_parse_attempt_details("text", parsed))
+                entities = [e for e in parsed.entities if e.present_in_source]
+                if parsed.mask_guidance_needed:
+                    mask_guidance_reasons.append("parser_flag")
+                if len(entities) != 1:
+                    mask_guidance_reasons.append("reference_count")
+                if not _single_span_is_unambiguous(parser_instruction, entities):
+                    mask_guidance_reasons.append("span_alignment")
+                if mask_guidance_reasons:
+                    parsed = self.parser.parse(
+                        parser_instruction,
+                        image=sample.image,
+                        mask=sample.mask,
+                        masked_reference_only=True,
+                    )
+                    parse_attempts.append(_parse_attempt_details("masked", parsed))
+                    entities = [e for e in parsed.entities if e.present_in_source]
+                    mask_guidance_used = True
+                    if not entities:
+                        text_entities = [
+                            entity
+                            for entity in text_parsed.entities
+                            if entity.present_in_source
+                        ]
+                        if _single_span_is_unambiguous(
+                            parser_instruction, text_entities
+                        ):
+                            entities = text_entities
+                            mask_guidance_reasons.append(
+                                "masked_retry_empty_text_fallback"
+                            )
         elif multi_object_add:
             if sample.mask is None or sample.mask.getbbox() is None:
                 raise AnnotationError("multi_object_add_mask_missing_or_empty")
@@ -522,7 +582,10 @@ class Annotator:
             parsed = self.parser.parse(parser_instruction)
             entities = [e for e in parsed.entities if e.present_in_source]
         if not entities:
-            raise NoReferenceError("no_source_visible_reference")
+            raise NoReferenceError(
+                "no_source_visible_reference",
+                parse_attempts=parse_attempts if masked_reference_only else None,
+            )
         if masked_reference_only and len(entities) != 1:
             raise AnnotationError(
                 f"refedit_expected_one_mask_reference:got_{len(entities)}"

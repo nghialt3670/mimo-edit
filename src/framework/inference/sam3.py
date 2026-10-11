@@ -22,18 +22,18 @@ def sam3_segment_mask(
     )
     input_labels = [[[point.get("label", 1) for point in points]]] if points else None
     input_boxes = [[list(validate_box(box))]] if box is not None else None
-    inputs = pool.sam3.tracker_processor(
+    inputs = pool.sam3_pipelines.tracker_processor(
         images=image.convert("RGB"),
         input_points=input_points,
         input_labels=input_labels,
         input_boxes=input_boxes,
         return_tensors="pt",
-    ).to(str(pool.sam3.tracker_model.device))
+    ).to(str(pool.sam3_pipelines.tracker_model.device))
     with torch.inference_mode():
-        outputs = pool.sam3.tracker_model(**inputs)
+        outputs = pool.sam3_pipelines.tracker_model(**inputs)
     scores = outputs.iou_scores[0, 0].cpu().tolist()
     best_index = max(range(len(scores)), key=scores.__getitem__)
-    mask = pool.sam3.tracker_processor.post_process_masks(
+    mask = pool.sam3_pipelines.tracker_processor.post_process_masks(
         outputs.pred_masks, original_sizes=inputs["original_sizes"]
     )[0][0][best_index]
     binary = (mask.cpu().numpy() > pool.config.sam3.mask_threshold).astype("uint8")
@@ -53,12 +53,12 @@ def sam3_segment_masks(
     if not isinstance(prompt, str) or not prompt.strip():
         raise ValueError("prompt must be a non-empty string")
     validate_number_range("min_confidence", min_confidence, 0, 1)
-    inputs = pool.sam3.text_processor(
+    inputs = pool.sam3_pipelines.text_processor(
         images=image.convert("RGB"), text=prompt, return_tensors="pt"
-    ).to(str(pool.sam3.text_model.device))
+    ).to(str(pool.sam3_pipelines.text_model.device))
     with torch.inference_mode():
-        outputs = pool.sam3.text_model(**inputs)
-    results = pool.sam3.text_processor.post_process_instance_segmentation(
+        outputs = pool.sam3_pipelines.text_model(**inputs)
+    results = pool.sam3_pipelines.text_processor.post_process_instance_segmentation(
         outputs, target_sizes=inputs["original_sizes"].tolist()
     )[0]
     threshold = pool.config.sam3.mask_threshold

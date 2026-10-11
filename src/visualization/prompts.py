@@ -12,6 +12,8 @@ from typing import Any
 import numpy as np
 from PIL import Image, ImageDraw
 
+from framework.utils.randomness import seed_random_generators
+
 
 def _mask_array(
     reference: dict[str, Any], base_dir: Path
@@ -204,6 +206,7 @@ def build_visual_prompts(
     base_dir: str | Path,
     sample_id: str,
 ) -> dict[str, Any]:
+    random_seed = seed_random_generators()
     mask, (width, height), geometry_source = _mask_array(reference, Path(base_dir))
     ys, xs = np.where(mask)
     x0, y0 = int(xs.min()), int(ys.min())
@@ -211,9 +214,9 @@ def build_visual_prompts(
     distance = _manhattan_distance_to_background(mask)
     point_y, point_x = np.unravel_index(int(distance.argmax()), distance.shape)
     seed_value = int.from_bytes(
-        hashlib.sha256(f"{sample_id}:{reference.get('token', '')}".encode()).digest()[
-            :8
-        ],
+        hashlib.sha256(
+            f"{random_seed}:{sample_id}:{reference.get('token', '')}".encode()
+        ).digest()[:8],
         "big",
     )
     stroke_width = max(2, round(min(width, height) * 0.006))

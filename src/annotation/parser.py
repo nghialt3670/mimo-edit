@@ -6,6 +6,8 @@ from typing import Protocol
 
 from PIL import Image
 
+from framework.utils.randomness import seed_random_generators
+
 from .schema import ParsedInstruction
 
 SYSTEM_PROMPT = """You are a strict semantic parser for image-editing benchmark annotation.
@@ -27,11 +29,20 @@ Rules:
 - Never rewrite the instruction.
 """
 
-MASKED_REFERENCE_PROMPT = """The input image has the dataset-provided mask overlaid in translucent magenta. The magenta region is the only visual reference to emit.
-Return exactly one entity: the verbatim phrase in the instruction that identifies the object covered by the magenta region. Use role="target" and present_in_source=true.
-Do not emit separate anchor, source, or context entities. Do not emit a part or appearance source as a second reference when it belongs to the masked object.
-If the instruction edits a part, clothing item, or accessory associated with a larger masked object, select the phrase identifying the masked object and leave the part/action words in the instruction.
-Do not treat an object in an "instead of" clause as a second reference unless it is the masked object.
+MASKED_REFERENCE_PROMPT = """The input image has the dataset-provided mask overlaid in translucent magenta. Use the highlighted pixels to identify the visible source entity that should become the visual reference.
+Return exactly one entity: a verbatim, non-overlapping phrase from the instruction that identifies the masked entity. Set present_in_source=true and choose its role based on the instruction:
+- Use role="target" only when the masked entity itself is the entity being edited.
+- Use role="anchor" when the instruction edits a distinct object, part, or accessory associated with the masked entity. In that case, select only the phrase identifying the masked entity; do not include the edited object/part/accessory in the span. Keeping that target phrase outside the span preserves the requested edit in the resulting mixed instruction.
+- For replacement instructions (for example, "change X to Y", "replace X with Y", or "swap X with Y"), X is the existing source entity and Y is the requested replacement. Never select Y as the visual reference; it may not exist in the source image.
+Examples:
+- "Erase the pink frisbee the man is holding." with the MAN masked -> span "the man", role="anchor". The resulting instruction is "Erase the pink frisbee <v1> is holding."
+- "Remove the eyeglasses of the white-haired man." with the MAN masked -> span "the white-haired man", role="anchor". Keep "the eyeglasses" outside the span.
+- "Change the young boy to a young girl." with the BOY masked -> span "the young boy", role="target"; the young girl is a requested replacement, not a source reference.
+- "Change the bird standing sideways to a birdhouse." with the BIRD masked -> span "the bird standing sideways", role="target"; the birdhouse is a requested replacement.
+- "Change the color of the shirt of the man in a grey suit." with the MAN masked -> span "the man in a grey suit", role="anchor". Keep "the shirt" and the requested color outside the span.
+- "Turn off the light of the microwave that has another microwave on top of it." with the LOWER MICROWAVE masked -> span "the microwave that has another microwave on top of it", role="anchor". Keep "the light" outside the span.
+- "Change the surfboard to red." with the SURFBOARD masked -> span "the surfboard", role="target".
+Do not select a larger phrase that combines the masked entity with a distinct edited object or accessory. Do not emit other entities, including newly requested objects or replacement objects.
 The span must be copied verbatim from the instruction. Never rewrite the instruction.
 """
 
@@ -73,6 +84,7 @@ class GoogleParser:
     ):
         from google import genai
 
+        self.seed = seed_random_generators()
         raw = model or os.getenv("ANNOTATE_LLM", "google/gemini-2.5-flash-lite")
         self.model = raw.split("/", 1)[1] if raw.startswith("google/") else raw
         key = api_key or os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
@@ -123,6 +135,7 @@ class GoogleParser:
                 config=types.GenerateContentConfig(
                     system_instruction=system_instruction,
                     temperature=0,
+                    seed=self.seed,
                     response_mime_type="application/json",
                     response_schema=ParsedInstruction,
                 ),

@@ -8,7 +8,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from .annotation_targets import ROOT, SUPPORTED_BENCHMARKS, annotation_target
+if __package__:
+    from .annotation_targets import ROOT, SUPPORTED_BENCHMARKS, annotation_target
+else:
+    from annotation_targets import ROOT, SUPPORTED_BENCHMARKS, annotation_target
 
 
 def _read_records(path: Path) -> list[dict[str, Any]]:

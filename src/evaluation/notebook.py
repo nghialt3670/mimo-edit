@@ -4,21 +4,26 @@ import os
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from framework.utils.project import load_project_environment
+from framework.utils.randomness import seed_random_generators
 
 from .common import HFImageLoader, read_jsonl
+
+PromptMode = Literal["text", "mixed"]
 
 _BENCHMARKS = {
     "compbench": (
         "MMEDIT_COMPBENCH_ANNOTATIONS",
-        ".out/annotation/compbench/compbench_local_multiobject_mixed.jsonl",
+        "MMEDIT_COMPBENCH_ANNOTATION_RUN",
+        "compbench_local_multiobject_mixed.jsonl",
         "MMEDIT_COMPBENCH_OUTPUT_DIR",
     ),
     "refedit_bench": (
         "MMEDIT_REFEDIT_BENCH_ANNOTATIONS",
-        ".out/annotation/refedit_bench/refedit_bench_mixed.jsonl",
+        "MMEDIT_REFEDIT_BENCH_ANNOTATION_RUN",
+        "refedit_bench_mixed.jsonl",
         "MMEDIT_REFEDIT_BENCH_OUTPUT_DIR",
     ),
 }
@@ -33,27 +38,91 @@ class BenchmarkContext:
     image_loader: HFImageLoader
 
 
+def resolve_annotation_file(
+    *,
+    project_root: Path,
+    benchmark: str,
+    annotation_override_env: str,
+    run_selection_env: str,
+    filename: str,
+) -> Path:
+    """Resolve an explicit annotation file or the selected timestamped run."""
+    configured_file = os.environ.get(annotation_override_env)
+    if configured_file:
+        annotation_file = Path(configured_file).expanduser()
+        if not annotation_file.is_absolute():
+            annotation_file = project_root / annotation_file
+        annotation_file = annotation_file.resolve()
+        if not annotation_file.is_file():
+            raise FileNotFoundError(
+                f"{benchmark} annotations not found: {annotation_file}."
+            )
+        return annotation_file
+
+    annotation_root = Path(
+        os.environ.get("ANNOTATE_OUT")
+        or project_root / ".out" / "annotation" / benchmark
+    ).expanduser()
+    if not annotation_root.is_absolute():
+        annotation_root = project_root / annotation_root
+    annotation_root = annotation_root.resolve()
+
+    selected_run = os.environ.get(run_selection_env) or "latest"
+    if selected_run == "latest":
+        run_directories = sorted(
+            path for path in annotation_root.glob("run_*") if path.is_dir()
+        )
+        available_runs = [
+            path for path in run_directories if (path / filename).is_file()
+        ]
+        if available_runs:
+            return available_runs[-1] / filename
+        if run_directories:
+            raise FileNotFoundError(
+                f"No {filename} found in annotation runs under {annotation_root}."
+            )
+        legacy_file = annotation_root / filename
+        if legacy_file.is_file():
+            return legacy_file
+        raise FileNotFoundError(
+            f"No {benchmark} annotation run containing {filename} found under "
+            f"{annotation_root}. Run the annotation notebook first or set "
+            f"{annotation_override_env}."
+        )
+
+    if Path(selected_run).name != selected_run or not selected_run.startswith("run_"):
+        raise ValueError(
+            f"{run_selection_env} must be 'latest' or a run_<timestamp> directory name."
+        )
+    selected_file = (annotation_root / selected_run / filename).resolve()
+    if selected_file.parent.parent != annotation_root or not selected_file.is_file():
+        raise FileNotFoundError(
+            f"{benchmark} annotations not found in selected run: {selected_file}."
+        )
+    return selected_file
+
+
 def load_benchmark(
     benchmark: str,
+    prompt_mode: PromptMode = "mixed",
 ) -> BenchmarkContext:
     """Load common local paths and annotations for a supported benchmark."""
     project_root = load_project_environment()
+    seed_random_generators()
+    if prompt_mode not in ("text", "mixed"):
+        raise ValueError(f"Unsupported prompt mode: {prompt_mode!r}")
     try:
-        annotation_env, default_annotation, output_env = _BENCHMARKS[benchmark]
+        annotation_env, run_env, filename, output_env = _BENCHMARKS[benchmark]
     except KeyError as exc:
         raise ValueError(f"Unsupported benchmark: {benchmark!r}") from exc
 
-    annotation_path = Path(
-        os.environ.get(annotation_env) or default_annotation
-    ).expanduser()
-    if not annotation_path.is_absolute():
-        annotation_path = project_root / annotation_path
-    annotation_file = annotation_path.resolve()
-    if not annotation_file.is_file():
-        raise FileNotFoundError(
-            f"{benchmark} annotations not found: {annotation_file}. "
-            f"Set {annotation_env}."
-        )
+    annotation_file = resolve_annotation_file(
+        project_root=project_root,
+        benchmark=benchmark,
+        annotation_override_env=annotation_env,
+        run_selection_env=run_env,
+        filename=filename,
+    )
     output_dir = (
         Path(
             os.environ.get(output_env)
@@ -62,6 +131,7 @@ def load_benchmark(
         .expanduser()
         .resolve()
     )
+    output_dir = output_dir / prompt_mode
     records = list(read_jsonl(annotation_file))
     if not records:
         raise ValueError(f"No {benchmark} annotations found in {annotation_file}")
@@ -133,6 +203,7 @@ def resolve_run_directory(
 def create_agent_model() -> Any:
     """Create the shared OpenAI-compatible model configured for inference."""
     load_project_environment()
+    seed_random_generators()
     api_key = os.environ.get("MMEDIT_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise EnvironmentError("Set MMEDIT_API_KEY or GOOGLE_API_KEY.")

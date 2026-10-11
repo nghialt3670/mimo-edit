@@ -77,9 +77,17 @@ def add_object(
 
     if box is not None:
         return flux2_klein_add_object_with_box(
-            ctx.model_pool.flux2_klein_pipeline, image, box, prompt
+            ctx.model_pool.flux2_klein_pipeline,
+            image,
+            box,
+            prompt,
+            config=ctx.model_pool.config.klein,
         )
 
     return flux2_klein_add_object_with_mask(
-        ctx.model_pool.flux2_klein_pipeline, image, mask, prompt
+        ctx.model_pool.flux2_klein_pipeline,
+        image,
+        mask,
+        prompt,
+        config=ctx.model_pool.config.klein,
     )

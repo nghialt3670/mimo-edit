@@ -11,6 +11,7 @@ import torch
 from framework.inference.external.objectclear.pipelines.pipeline_objectclear import (
     ObjectClearPipeline,
 )
+from framework.utils.randomness import seed_random_generators
 
 from .config import InferenceConfig
 from .utils import get_device, torch_dtype
@@ -40,9 +41,8 @@ class ModelPool:
 
     Public attributes:
         flux2_klein_pipeline          - regular image editing
-        flux2_klein_inpaint_pipeline  - masked editing (shares Klein weights)
-        sam3                          - text and point/box segmentation
-        object_clear                  - object removal
+        sam3_pipelines                - text and point/box segmentation
+        object_clear_pipeline         - object removal
     """
 
     FLUX2_KLEIN_MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
@@ -50,6 +50,7 @@ class ModelPool:
     OBJECT_CLEAR_MODEL_ID = "jixin0101/ObjectClear"
 
     def __init__(self, config: InferenceConfig | None = None) -> None:
+        seed_random_generators()
         self.config = config if config is not None else InferenceConfig()
         self.device = get_device()
         self._pipelines = (
@@ -57,14 +58,6 @@ class ModelPool:
             self.sam3_pipelines,
             self.object_clear_pipeline,
         )
-
-    @property
-    def sam3(self) -> Sam3Pipelines:
-        return self.sam3_pipelines
-
-    @property
-    def object_clear(self) -> ObjectClearPipeline:
-        return self.object_clear_pipeline
 
     @cached_property
     def flux2_klein_pipeline(self) -> Flux2KleinPipeline:

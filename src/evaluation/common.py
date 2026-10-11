@@ -10,14 +10,23 @@ import traceback
 from collections.abc import Iterable, Iterator
 from io import BytesIO
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 from PIL import Image, ImageDraw
 from tqdm.auto import tqdm
 
+from framework.utils.randomness import seed_random_generators
+
+from .spatial import needs_spatial_anchor_box
+
 AGENT_EXECUTION_TIMEOUT_SECONDS = 300
-DEFAULT_PROMPT_SELECTION_SEED = 42
+PromptMode = Literal["text", "mixed"]
+
+
+def _validate_prompt_mode(prompt_mode: str) -> None:
+    if prompt_mode not in ("text", "mixed"):
+        raise ValueError(f"Unsupported prompt mode: {prompt_mode!r}")
 
 
 def read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
@@ -129,24 +138,13 @@ class HFImageLoader:
         return source_image, target_image
 
 
-def _get_instruction(record: dict[str, Any], benchmark: str) -> str | None:
-    fields = (
-        ("mixed_instruction", "instruction", "prompt", "task")
-        if benchmark == "compbench"
-        else (
-            "original_instruction",
-            "instruction",
-            "prompt",
-            "edit_instruction",
-            "mixed_instruction",
-            "task",
-        )
+def _get_instruction(record: dict[str, Any], prompt_mode: PromptMode) -> str | None:
+    _validate_prompt_mode(prompt_mode)
+    primary_field = (
+        "original_instruction" if prompt_mode == "text" else "mixed_instruction"
     )
-    for field in fields:
-        value = record.get(field)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
+    value = record.get(primary_field)
+    return value.strip() if isinstance(value, str) and value.strip() else None
 
 
 def load_sample(
@@ -154,7 +152,9 @@ def load_sample(
     *,
     benchmark: str,
     image_loader: HFImageLoader,
+    prompt_mode: PromptMode = "mixed",
 ) -> dict[str, Any]:
+    _validate_prompt_mode(prompt_mode)
     source_image, target_image = image_loader.load_pair(record)
     metadata = record.get("metadata") or {}
     spatial_destination = benchmark == "compbench" and metadata.get("task") in {
@@ -179,7 +179,7 @@ def load_sample(
         )
     return {
         "sample_id": record.get("sample_id"),
-        "instruction": _get_instruction(record, benchmark),
+        "instruction": _get_instruction(record, prompt_mode),
         "source_image": source_image,
         "target_image": target_image,
         "references": references,
@@ -197,17 +197,36 @@ def build_agent_task(sample: dict[str, Any]) -> tuple[str, dict[str, Any]]:
     return sample["instruction"], objects
 
 
-def build_agent_context(sample: dict[str, Any]) -> str:
+def build_agent_context(
+    sample: dict[str, Any], prompt_mode: PromptMode = "mixed"
+) -> str:
     """Build agent guidance separately from the user instruction/observation."""
+    _validate_prompt_mode(prompt_mode)
     lines = [
         "Use image_0 as the source image. Follow the user instruction and return the "
         "final edited image.",
-        "For each reference to an existing entity, call segment_object with its "
-        "single supplied box, point, or scribble selector to create a mask before "
-        "editing. A spatial destination is not an existing entity: use its supplied "
-        "box directly with add_object, without calling segment_object. Never "
-        "use annotation masks or crops. Do not combine selector types for one reference. "
-        "Apply edits to each required object in sequence and preserve unrelated "
+        (
+            "This is text-only reference mode. For each existing entity, use "
+            "segment_object with a natural-language text description from the "
+            "instruction or reference description. Do not use annotation boxes, "
+            "points, scribbles, masks, or crops as model inputs. For a spatial "
+            "destination, infer placement from the image and instruction rather "
+            "than using annotation geometry."
+            if prompt_mode == "text"
+            else (
+                "The user instruction contains visual placeholders such as "
+                "<point_0>, <box_1>, or <scribble_2>. Each placeholder names the "
+                "exact Python variable bound in the observation; use that variable "
+                "directly and do not infer a variable from placeholder order. For "
+                "each reference to an existing entity, call segment_object with "
+                "its single supplied selector to create a mask before editing. A "
+                "spatial destination is not an existing entity: use its supplied "
+                "box directly with add_object, without calling segment_object. "
+                "Never use annotation masks or crops. Do not combine selector "
+                "types for one reference."
+            )
+        )
+        + " Apply edits to each required object in sequence and preserve unrelated "
         "image content.",
         "Choose edit_object mode intentionally: local for appearance-only changes, "
         "regional for identity/shape/accessory changes near the object, global only "
@@ -219,11 +238,28 @@ def build_agent_context(sample: dict[str, Any]) -> str:
         "unmentioned details. Use other registered tools when they better match the "
         "requested operation.",
     ]
+    if prompt_mode == "mixed" and needs_spatial_anchor_box(
+        sample.get("instruction") or ""
+    ):
+        lines.append(
+            "This request places a new object relative to an existing reference. "
+            "Use the reference's supplied box as the full-object anchor when "
+            "calculating placement; do not infer the object's full extent from a "
+            "point-selected or segmented mask, which may cover only a visible part. "
+            "Use segment_object with the supplied box if a mask is needed."
+        )
     for index, ref in enumerate(sample["references"]):
-        token = ref["token"] or f"reference_{index}"
+        token = ref.get("display_token") or ref["token"] or f"reference_{index}"
         selected = ref.get("selected_prompt")
         description = ref.get("span")
         description_line = f" refers to {description!r};" if description else ""
+        if prompt_mode == "text":
+            if description:
+                lines.append(
+                    f"Reference {token}{description_line} use that natural-language "
+                    "description with segment_object(text=...)."
+                )
+            continue
         selector_line = ""
         if selected is not None:
             selector_line = (
@@ -246,11 +282,23 @@ def build_agent_context(sample: dict[str, Any]) -> str:
 
 def select_reference_prompts(
     sample: dict[str, Any],
-    *,
-    seed: int = DEFAULT_PROMPT_SELECTION_SEED,
+    prompt_mode: PromptMode = "mixed",
 ) -> None:
-    """Select one available visual selector per reference reproducibly."""
+    """Select a visual selector per reference, unless running text-only mode."""
+    _validate_prompt_mode(prompt_mode)
+    if prompt_mode == "text":
+        sample.pop("annotation_instruction", None)
+        for ref in sample["references"]:
+            ref["selected_prompt"] = None
+            ref["display_token"] = ref.get("token")
+        return
+
+    sample.setdefault("annotation_instruction", sample.get("instruction") or "")
+    instruction = sample["annotation_instruction"]
+    display_tokens: dict[str, str] = {}
+    seed = seed_random_generators()
     rng = random.Random(f"{seed}:{sample.get('sample_id')}")
+    use_anchor_boxes = needs_spatial_anchor_box(sample.get("instruction") or "")
     for index, ref in enumerate(sample["references"]):
         prompt_options = []
         if ref["bbox_xyxy"] is not None:
@@ -262,15 +310,32 @@ def select_reference_prompts(
             if strokes and strokes[0]:
                 prompt_options.append(("scribble", strokes[0]))
 
-        if prompt_options:
-            prompt_type, value = rng.choice(prompt_options)
+        if use_anchor_boxes and not ref.get("spatial_destination"):
+            selected_prompt = (
+                ("box", ref["bbox_xyxy"]) if ref["bbox_xyxy"] is not None else None
+            )
+        else:
+            selected_prompt = rng.choice(prompt_options) if prompt_options else None
+
+        if selected_prompt is not None:
+            prompt_type, value = selected_prompt
+            variable = f"{prompt_type}_{index}"
             ref["selected_prompt"] = {
                 "type": prompt_type,
                 "value": value,
-                "variable": f"{prompt_type}_{index}",
+                "variable": variable,
             }
+            ref["display_token"] = f"<{variable}>"
+            token = ref.get("token")
+            if token:
+                display_tokens[token] = ref["display_token"]
         else:
             ref["selected_prompt"] = None
+            ref["display_token"] = ref.get("token")
+
+    for token, display_token in display_tokens.items():
+        instruction = instruction.replace(token, display_token)
+    sample["instruction"] = instruction
 
 
 def annotate_sample(sample: dict[str, Any]) -> Image.Image:
@@ -312,7 +377,7 @@ def annotate_sample(sample: dict[str, Any]) -> Image.Image:
             elif points:
                 draw.line(points, fill=(0, 220, 255, 255), width=line_width * 2)
                 label_origin = points[0]
-        label = ref.get("token") or f"reference_{index}"
+        label = ref.get("display_token") or ref.get("token") or f"reference_{index}"
         x, y = label_origin
         draw.text(
             (x, max(0, y - line_width * 8)),
@@ -423,15 +488,17 @@ def run_one(
     annotation_index: int,
     *,
     benchmark: str,
+    prompt_mode: PromptMode,
     output_dir: Path,
     image_loader: HFImageLoader,
     model: Any,
     tools: list[Any],
-    seed: int = DEFAULT_PROMPT_SELECTION_SEED,
     max_steps: int = 16,
 ) -> dict[str, Any]:
+    _validate_prompt_mode(prompt_mode)
     from framework.core import Agent, local_executor
 
+    seed = seed_random_generators()
     start = time.perf_counter()
     sample_id = record.get("sample_id") or f"annotation_{annotation_index}"
     safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", str(sample_id)).strip("._") or "sample"
@@ -442,9 +509,10 @@ def run_one(
     images_dir.mkdir(parents=True, exist_ok=True)
     entry: dict[str, Any] = {
         "benchmark": benchmark,
+        "prompt_mode": prompt_mode,
         "sample_id": sample_id,
         "annotation_index": annotation_index,
-        "instruction": _get_instruction(record, benchmark),
+        "instruction": _get_instruction(record, prompt_mode),
         "target_available": record.get("target_ref") is not None,
         "random_seed": seed,
         "status": "running",
@@ -458,6 +526,7 @@ def run_one(
             record,
             benchmark=benchmark,
             image_loader=image_loader,
+            prompt_mode=prompt_mode,
         )
         if not sample["instruction"]:
             raise ValueError(
@@ -465,12 +534,15 @@ def run_one(
             )
         sample["sample_id"] = sample.get("sample_id") or sample_id
         entry["target_available"] = sample["target_image"] is not None
-        select_reference_prompts(sample, seed=seed)
+        select_reference_prompts(sample, prompt_mode)
         task, objects = build_agent_task(sample)
-        agent_context = build_agent_context(sample)
+        agent_context = build_agent_context(sample, prompt_mode)
+        entry["instruction"] = task
         entry["reference_prompts"] = [
             {
-                "token": ref["token"],
+                "token": ref.get("display_token") or ref["token"],
+                "annotation_token": ref["token"],
+                "variable": ref["selected_prompt"]["variable"],
                 "type": ref["selected_prompt"]["type"],
                 "value": ref["selected_prompt"]["value"],
             }
@@ -603,65 +675,130 @@ def run_benchmark(
     sample_indices: Iterable[int],
     *,
     benchmark: str,
+    prompt_mode: PromptMode = "mixed",
     output_dir: Path,
     image_loader: HFImageLoader,
     model: Any,
     tools: list[Any],
-    seed: int = DEFAULT_PROMPT_SELECTION_SEED,
+    resume: bool = False,
+    rerun_completed: bool = False,
     display_fn: Any = None,
 ) -> list[dict[str, Any]]:
+    _validate_prompt_mode(prompt_mode)
+    if rerun_completed and not resume:
+        raise ValueError("rerun_completed requires resume=True.")
     output_dir.mkdir(parents=True, exist_ok=True)
-    results = []
     results_path = output_dir / "results" / "results.jsonl"
     results_path.parent.mkdir(parents=True, exist_ok=True)
-    total = len(sample_indices) if hasattr(sample_indices, "__len__") else None
-    failures = []
-    with results_path.open("w", encoding="utf-8") as stream:
-        progress = tqdm(
-            sample_indices,
-            total=total,
-            desc=f"{benchmark} inference",
-            unit="sample",
-        )
-        for annotation_index in progress:
-            if not 0 <= annotation_index < len(records):
-                raise IndexError(f"Annotation index out of range: {annotation_index}")
-            sample_id = records[annotation_index].get(
-                "sample_id", f"annotation_{annotation_index}"
+    selected_indices = list(dict.fromkeys(sample_indices))
+    for annotation_index in selected_indices:
+        if not 0 <= annotation_index < len(records):
+            raise IndexError(f"Annotation index out of range: {annotation_index}")
+
+    results_by_index: dict[int, dict[str, Any]] = {}
+    if resume:
+        if not results_path.is_file():
+            raise FileNotFoundError(
+                f"Cannot resume; inference results not found: {results_path}"
             )
-            progress.set_postfix(
-                sample=str(sample_id),
-                status="running",
-                refresh=True,
-            )
-            result = run_one(
-                records[annotation_index],
-                annotation_index,
-                benchmark=benchmark,
-                output_dir=output_dir,
-                image_loader=image_loader,
-                model=model,
-                tools=tools,
-                seed=seed,
-            )
-            results.append(result)
-            stream.write(json.dumps(result, ensure_ascii=False) + "\n")
-            stream.flush()
-            progress.set_postfix(
-                sample=str(result["sample_id"]),
-                status=result["status"],
-                refresh=False,
-            )
-            if result["status"] == "failed":
-                failures.append(
-                    {
-                        "sample_id": result["sample_id"],
-                        "error": result.get("error", "Unknown error"),
-                    }
+        for previous_result in read_jsonl(results_path):
+            annotation_index = previous_result.get("annotation_index")
+            if not isinstance(annotation_index, int) or not (
+                0 <= annotation_index < len(records)
+            ):
+                raise ValueError(
+                    f"Invalid annotation_index in {results_path}: {annotation_index!r}"
                 )
-            if result["status"] == "completed" and display_fn is not None:
-                with Image.open(result["output_path"]) as output_image:
-                    display_fn(output_image.copy())
+            if previous_result.get("benchmark") != benchmark:
+                raise ValueError(
+                    f"Cannot resume {benchmark!r} from results for "
+                    f"{previous_result.get('benchmark')!r}."
+                )
+            if previous_result.get("prompt_mode") != prompt_mode:
+                raise ValueError(
+                    f"Cannot resume {prompt_mode!r} mode from results for "
+                    f"{previous_result.get('prompt_mode')!r} mode."
+                )
+            expected_sample_id = records[annotation_index].get("sample_id") or (
+                f"annotation_{annotation_index}"
+            )
+            if previous_result.get("sample_id") != expected_sample_id:
+                raise ValueError(
+                    f"Cannot resume annotation {annotation_index}: expected sample "
+                    f"{expected_sample_id!r}, found "
+                    f"{previous_result.get('sample_id')!r}."
+                )
+            results_by_index[annotation_index] = previous_result
+
+    pending_indices = [
+        index
+        for index in selected_indices
+        if rerun_completed
+        or results_by_index.get(index, {}).get("status") != "completed"
+    ]
+    total = len(pending_indices)
+    failures = []
+
+    def persist_results() -> None:
+        temporary_path = results_path.with_name(f".{results_path.name}.tmp")
+        contents = "".join(
+            json.dumps(result, ensure_ascii=False) + "\n"
+            for _, result in sorted(results_by_index.items())
+        )
+        temporary_path.write_text(contents, encoding="utf-8")
+        temporary_path.replace(results_path)
+
+    if not resume and not pending_indices:
+        persist_results()
+
+    progress = tqdm(
+        pending_indices,
+        total=total,
+        desc=f"{benchmark} inference",
+        unit="sample",
+    )
+    for annotation_index in progress:
+        sample_id = records[annotation_index].get(
+            "sample_id", f"annotation_{annotation_index}"
+        )
+        progress.set_postfix(
+            sample=str(sample_id),
+            status="running",
+            refresh=True,
+        )
+        result = run_one(
+            records[annotation_index],
+            annotation_index,
+            benchmark=benchmark,
+            prompt_mode=prompt_mode,
+            output_dir=output_dir,
+            image_loader=image_loader,
+            model=model,
+            tools=tools,
+        )
+        results_by_index[annotation_index] = result
+        persist_results()
+        progress.set_postfix(
+            sample=str(result["sample_id"]),
+            status=result["status"],
+            refresh=False,
+        )
+        if result["status"] == "failed":
+            failures.append(
+                {
+                    "sample_id": result["sample_id"],
+                    "error": result.get("error", "Unknown error"),
+                }
+            )
+        if result["status"] == "completed" and display_fn is not None:
+            with Image.open(result["output_path"]) as output_image:
+                display_fn(output_image.copy())
     for failure in failures:
         tqdm.write(f"Failed {failure['sample_id']}: {failure['error']}")
-    return results
+    if resume:
+        persist_results()
+    return [
+        results_by_index[index]
+        for index in selected_indices
+        if index in results_by_index
+    ]

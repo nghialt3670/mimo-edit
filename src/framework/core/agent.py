@@ -7,6 +7,8 @@ from typing import Any
 from smolagents import CodeAgent, Tool
 from smolagents.memory import ActionStep, TaskStep
 
+from framework.utils.randomness import seed_random_generators
+
 from .executor import TerminalExecutor, local_executor
 from .schema import Message, TurnResult
 from .trajectory import clean_trajectory, format_trajectory
@@ -18,11 +20,10 @@ An Observation is JSON. A user observation has this form:
 {"type":"user_message","text":"...","objects":["image_0","point_0", ...]}
 
 The `objects` entries are Python variable names already bound in your persistent execution
-namespace. Use those variables directly. Visual placeholders in text such as `<point>`, `<box>`,
-and `<scribble>` correspond by type and occurrence order to same-type variables in `objects`
-(e.g. the first `<point>` is `point_0`, the second is `point_1`). Variables you create in code
-persist across later steps and later user turns. Never invent a variable that has not appeared in
-an Observation or been created by your own earlier code.
+namespace. Use those variables directly. In mixed visual-prompt mode, placeholders name the
+exact supplied variable, such as `<point_0>` for `point_0` or `<box_1>` for `box_1`. Variables
+you create in code persist across later steps and later user turns. Never invent a variable that
+has not appeared in an Observation or been created by your own earlier code.
 
 At every agent step you MUST produce exactly two structured fields:
 - `thought`: one concise plain-text reasoning string describing the next action.
@@ -147,6 +148,7 @@ class Agent:
         verbosity_level: int = 1,
         structured_thought: bool = True,
     ) -> None:
+        seed_random_generators()
         self.model = model
         self.tools = list(tools)
         self.max_steps = max_steps

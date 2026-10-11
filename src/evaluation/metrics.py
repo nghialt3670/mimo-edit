@@ -5,7 +5,7 @@ import math
 from collections import defaultdict
 from collections.abc import Sequence
 from statistics import fmean
-from typing import Any
+from typing import Any, Literal
 
 from PIL import Image, ImageDraw
 
@@ -78,12 +78,20 @@ def crop_pair_to_mask_roi(
 
 def summarize_viescore_scores(
     rows: Sequence[dict[str, Any]],
+    *,
+    prompt_mode: Literal["text", "mixed"] | None = None,
 ) -> dict[str, dict[str, float | int]]:
     """Return mean SC, PQ, and O scores grouped by normalized category."""
     grouped: dict[str, dict[str, list[float]]] = defaultdict(
         lambda: {"sc": [], "pq": [], "o": []}
     )
     for row in rows:
+        row_prompt_mode = row.get("prompt_mode")
+        if prompt_mode is not None and row_prompt_mode != prompt_mode:
+            raise ValueError(
+                f"Expected {prompt_mode!r} prompt-mode scores, got "
+                f"{row_prompt_mode!r} for {row.get('sample_id')!r}"
+            )
         category = str(row["category"]).strip().lower()
         if category not in {"easy", "hard"}:
             raise ValueError(f"Unexpected RefEdit category: {row['category']!r}")

@@ -43,12 +43,12 @@ def clean_trajectory(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def format_trajectory(steps: list[dict[str, Any]]) -> str:
     chunks: list[str] = []
     for item in clean_trajectory(steps):
-        if "observation" in item:
-            chunks.append("Observation:\n" + _pretty(item["observation"]))
         if "thought" in item:
             chunks.append("Thought:\n" + str(item["thought"]).strip())
         if "act" in item:
             chunks.append("Act:\n" + str(item["act"]).strip())
+        if "observation" in item:
+            chunks.append("Observation:\n" + _pretty(item["observation"]))
     return "\n\n".join(chunks)
 
 

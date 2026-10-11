@@ -11,7 +11,7 @@ This document describes the tools registered by
 | [`edit_object`](../src/framework/tools/image_editing/edit_object.py) | Semantically edit one masked object | FLUX.2 Klein base 4B |
 | [`remove_object`](../src/framework/tools/image_editing/remove_object.py) | Remove one masked object | ObjectClear |
 | [`replace_object`](../src/framework/tools/image_editing/replace_object.py) | Remove an object, then paste a replacement image | ObjectClear + Pillow |
-| [`add_object`](../src/framework/tools/image_editing/add_object.py) | Inpaint an object into a selected region | FLUX.2 Klein base 4B |
+| [`add_object`](../src/framework/tools/image_editing/add_object.py) | Generate an object inside a selected region | FLUX.2 Klein base 4B |
 | [`move_object`](../src/framework/tools/image_editing/move_object.py) | Move one object to a point or box | ObjectClear + Pillow |
 | [`shift_object`](../src/framework/tools/image_editing/shift_object.py) | Translate one object by an offset | ObjectClear + Pillow |
 | [`rotate_object`](../src/framework/tools/image_editing/rotate_object.py) | Rotate one object | ObjectClear + Pillow |
@@ -106,8 +106,9 @@ The image-edit backend receives a crop and the composed editing instruction:
   mask-based compositing, so unrelated areas can change.
 
 **Backbone:** `black-forest-labs/FLUX.2-klein-base-4B`, loaded through
-Diffusers' `Flux2KleinPipeline`. Editing uses 50 inference steps, guidance
-scale `4.0`, and seed `42` by default. The base checkpoint is slower than the
+Diffusers' `Flux2KleinPipeline`. Editing uses 50 inference steps and guidance
+scale `4.0`. Stochastic operations use the required project `RANDOM_SEED` from
+the environment. The base checkpoint is slower than the
 distilled model, but is better suited to prompt-guided inpainting. Both editing
 and generation use this same backend; there is no alternate model backend.
 
@@ -121,7 +122,7 @@ sampling; the image and mask are resized for the model and the result is
 resized back to the original image dimensions.
 
 **Backbone:** `jixin0101/ObjectClear` by default. It uses eight inference steps,
-guidance scale `2.0`, seed `42`, and a minimum working image side of 384 pixels
+guidance scale `2.0` and a minimum working image side of 384 pixels
 by default. ObjectClear is distributed under its upstream S-Lab license, which
 restricts use to non-commercial purposes; review the included license before use.
 
@@ -170,16 +171,13 @@ raises an error.
 
 **Backbone**
 
-`add_object` calls the FLUX.2 Klein 4B inpainting pipeline directly with the
-selected mask and prompt. If a box is supplied, the tool converts it to a
-rectangular mask with a softly feathered inner edge (up to 6 pixels) to reduce
-hard seams while preserving pixels outside the box. The pool's
-`KleinInferenceConfig` supplies the default
-inpainting strength, step count, guidance scale, and seed. The pipeline crops
-around the selected region with 64 pixels of context by default, improving
-focus on small destination boxes, then overlays the edited crop into the
-original image. Configure `inpaint_padding_mask_crop` to change the context
-padding.
+`add_object` uses the shared FLUX.2 Klein 4B editing pipeline. If a box is
+supplied, the tool converts it to a rectangular mask with a softly feathered
+inner edge (up to 6 pixels) to reduce hard seams while preserving pixels
+outside the box. With a mask, the pipeline generates a contextual crop around
+the selected region (64 pixels of context by default), then overlays the
+generated crop only inside the mask. `KleinInferenceConfig` controls the step
+count, guidance scale, and mask context padding.
 
 ### `move_object`
 
@@ -291,11 +289,12 @@ tools = image_editing_tools(
 )
 ```
 
-`KleinInferenceConfig` controls `num_inference_steps`, `guidance_scale`,
-`inpaint_strength`, `inpaint_padding_mask_crop`, and the default edit seed.
+`KleinInferenceConfig` controls `num_inference_steps`, `guidance_scale`, and
+`mask_context_padding`.
 `Sam3InferenceConfig` controls `mask_threshold`. `ObjectClearInferenceConfig`
 controls `num_inference_steps`,
-`guidance_scale`, `seed`, and `working_min_side`. Editing and generation share
+`guidance_scale`, and `working_min_side`. The required project-wide
+`RANDOM_SEED` controls stochastic operations. Editing and generation share
 Klein; object transforms share ObjectClear; visual and text segmentation share
 SAM 3. Defaults preserve the existing inference settings.
 

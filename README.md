@@ -17,6 +17,8 @@ uv sync --extra models
 
 Creating `ModelPool` downloads and eagerly loads all three backbones. Ensure sufficient memory is available before constructing it; the pool remains resident for the lifetime of the tools. Gated Hugging Face models require `HF_TOKEN`.
 
+Set the required `RANDOM_SEED` integer in `.env` to seed Python, NumPy, Torch, model pipelines, benchmark prompt selection, and supported LLM APIs. It is the sole seed source; the project fails fast when it is missing or outside the range `0` through `4294967295`.
+
 Install the development formatters and format Python source with:
 
 ```bash
@@ -43,9 +45,20 @@ result = agent.send(
 edited = result.message.objects[0]
 ```
 
-Pass Pillow `Image` instances and grayscale Pillow masks as objects. White mask pixels select the entity. Object-targeting tools accept one mask/object per call; issue another tool call for each additional object. `segment_object` accepts exactly one text prompt, point, box, or scribble and returns one mask; text prompts return the highest-scoring match. `add_object` sends the selected mask and prompt directly to FLUX.2 Klein's inpainting pipeline. The tool set shares its eagerly initialized `ModelPool`.
+Pass Pillow `Image` instances and grayscale Pillow masks as objects. White mask pixels select the entity. Object-targeting tools accept one mask/object per call; issue another tool call for each additional object. `segment_object` accepts exactly one text prompt, point, box, or scribble and returns one mask; text prompts return the highest-scoring match. `add_object` sends the selected crop and prompt to the shared FLUX.2 Klein editing pipeline, then composites the result only inside the mask. The tool set shares its eagerly initialized `ModelPool`.
 
 For every registered image-editing tool's inputs, behavior, and default backbone, see the detailed [tool reference](./docs/TOOLS.md).
+
+To find completed RefEdit-Bench mixed-mode samples where a spatial placement
+used a point or scribble despite a full reference box, run:
+
+```bash
+uv run python -m evaluation.spatial_selector_issues \
+  .out/evaluation/refedit_bench/mixed --indices-only
+```
+
+Set `RERUN_SPATIAL_SELECTOR_ISSUES = True` in the RefEdit-Bench mixed inference
+notebook to detect and rerun only those samples in the latest run.
 
 ObjectClear is provided under its upstream S-Lab license, which restricts use to non-commercial purposes. Review the license before enabling that model.
 
@@ -61,24 +74,26 @@ from framework import InferenceConfig, KleinInferenceConfig, image_editing_tools
 tools = image_editing_tools(
     inference_config=InferenceConfig(
         klein=KleinInferenceConfig(
-            num_inference_steps=50,
-            guidance_scale=4.0,
-            inpaint_strength=1.0,
+            num_inference_steps=4,
+            guidance_scale=1.0,
+            mask_context_padding=64,
         ),
     )
 )
 ```
 
-`KleinInferenceConfig` controls the shared edit/inpainting step count and
-guidance scale, inpainting strength and mask-crop padding, and default edit seed.
-The base checkpoint defaults to 50 steps and guidance scale `4.0`, so edits
-take longer than with the distilled checkpoint.
-The inpainting pipeline crops around the selected region with 64 pixels of
-context by default, then overlays the generated crop into the source image.
+`KleinInferenceConfig` controls the shared edit/generation step count,
+guidance scale, and context padding around masked generation.
+The inference config defaults to 4 steps and guidance scale `1.0`, matching
+Black Forest Labs' FLUX.2 Klein 4B example.
+Masked generation crops around the selected region with 64 pixels of context by
+default, then overlays the generated crop only inside the selected mask.
 `Sam3InferenceConfig` controls segmentation mask thresholding.
 `ObjectClearInferenceConfig` controls
-removal steps, guidance, seed, and minimum working image side. `add_object`
-uses Klein inpainting directly on the supplied mask or the rectangular mask built from its box.
+removal steps, guidance, and minimum working image side. The project-wide
+`RANDOM_SEED` controls stochastic operations. `add_object` uses Klein to
+generate a contextual crop and composites it only inside the supplied mask or
+the rectangular mask built from its box.
 Its box uses `[x1, y1, x2, y2]` coordinates with the lower-right edge exclusive.
 The Klein base 4B model card reports approximately 13 GB VRAM for GPU use; Apple
 Silicon uses MPS with float16, but speed and memory usage depend on the Mac.
@@ -98,13 +113,19 @@ See the [FLUX.2 Klein base 4B model card](https://huggingface.co/black-forest-la
 
 ## Benchmark the Agent
 
-Benchmark helpers live in [`src/evaluation/`](./src/evaluation/). The [CompBench inference](./src/notebooks/compbench_inference.ipynb) and [RefEdit-Bench inference](./src/notebooks/refedit_bench_inference.ipynb) notebooks use shared path/configuration and OpenAI-compatible model setup from `evaluation.notebook`, then load `hf://` images using their original dataset row indices. They read annotation outputs generated by the project: `.out/annotation/compbench/compbench_local_multiobject_mixed.jsonl` and `.out/annotation/refedit_bench/refedit_bench_mixed.jsonl`; run the corresponding annotation notebook first. Optional `MMEDIT_COMPBENCH_ANNOTATIONS` and `MMEDIT_REFEDIT_BENCH_ANNOTATIONS` variables can override those files. Each inference execution creates a separate `.out/evaluation/<benchmark>/run_<timestamp>/` directory containing `logs/` and `results/`; metrics are created separately under the same run only when the metrics workflow runs. Both run all annotations by default and display a concise tqdm progress bar; use [CompBench debug](./src/notebooks/compbench_debug.ipynb) to inspect one representative sample from each task type. Visual prompts are selected reproducibly with `RANDOM_SEED = 42`; selection combines the seed with each sample ID so a sample keeps its prompt choice across individual, subset, and full runs. Install with `uv sync --extra models --extra benchmark`, copy `.env.example` to `.env`, then set `MMEDIT_API_KEY` or `GOOGLE_API_KEY`.
+`MMEDIT_COMPBENCH_OUTPUT_DIR` and `MMEDIT_REFEDIT_BENCH_OUTPUT_DIR`, when set, override the benchmark output root; the selected `text` or `mixed` subdirectory is appended automatically.
 
-The standalone [RefEdit-Bench metrics notebook](./src/notebooks/refedit_bench_metrics.ipynb) scores a selected saved run without rerunning the agent; it defaults to the latest run, or can select one with `MMEDIT_REFEDIT_BENCH_RUN`. Per-sample scores are written to `<run>/metrics/modified_viescore.jsonl`, separate from `<run>/results/`. Its implementation is in [`src/evaluation/refedit_bench_viescore.py`](./src/evaluation/refedit_bench_viescore.py). It uses the original `metadata.edit_instruction_single`, the GT polygon mask, and a tight shared ROI crop before scoring with VIEScore `task="tie"` and GPT-4o. Configure `VIESCORE_ROOT` and `VIESCORE_KEY_PATH` to enable scoring; keep the key file local and uncommitted. Run the evaluator from the repository root with `uv run python -m evaluation.refedit_bench_viescore`.
+Benchmark helpers live in [`src/evaluation/`](./src/evaluation/). Run either the [CompBench text-prompt notebook](./src/notebooks/inference/compbench_inference_text.ipynb) or [CompBench mixed-prompt notebook](./src/notebooks/inference/compbench_inference_mixed.ipynb), and likewise the [RefEdit-Bench text-prompt notebook](./src/notebooks/inference/refedit_bench_inference_text.ipynb) or [mixed-prompt notebook](./src/notebooks/inference/refedit_bench_inference_mixed.ipynb). Text mode uses each annotation's `original_instruction`; mixed mode uses `mixed_instruction` with visual-reference tokens. Both modes use shared inference helpers and load `hf://` images using their original dataset row indices. By default, inference selects the latest annotation run containing the expected JSONL under `.out/annotation/<benchmark>/run_*/`. Set `MMEDIT_COMPBENCH_ANNOTATION_RUN` or `MMEDIT_REFEDIT_BENCH_ANNOTATION_RUN` to a specific `run_<timestamp>`, or `MMEDIT_COMPBENCH_ANNOTATIONS` / `MMEDIT_REFEDIT_BENCH_ANNOTATIONS` to an explicit JSONL path. `ANNOTATE_OUT` selects a non-default annotation root. Each inference execution creates a separate `.out/evaluation/<benchmark>/<text|mixed>/run_<timestamp>/` directory containing `logs/` and `results/`; metrics are created separately under the same run only when the metrics workflow runs. Both run all annotations by default and display a concise tqdm progress bar; use [CompBench debug](./src/notebooks/compbench_debug.ipynb) to inspect one representative sample from each task type. Visual prompts are selected reproducibly from the required `RANDOM_SEED` environment variable, combined with each sample ID so a sample keeps its prompt choice across individual, subset, and full runs. Copy `.env.example` to `.env`, set `RANDOM_SEED`, then set `MMEDIT_API_KEY` or `GOOGLE_API_KEY`.
+
+The [RefEdit-Bench text metrics notebook](./src/notebooks/metrics/refedit_bench_metrics_text.ipynb) and [mixed metrics notebook](./src/notebooks/metrics/refedit_bench_metrics_mixed.ipynb) score saved runs without rerunning the agent. Each selects the latest run in its own prompt family by default; set `MMEDIT_REFEDIT_BENCH_TEXT_RUN` or `MMEDIT_REFEDIT_BENCH_MIXED_RUN` to select a specific run. Per-sample scores are written to `<run>/metrics/modified_viescore.jsonl`, separate from `<run>/results/`. The matching command-line entrypoints are `uv run python -m evaluation.refedit_bench_metrics_text` and `uv run python -m evaluation.refedit_bench_metrics_mixed`; pass `--run run_<timestamp>` to select a run explicitly. Their shared implementation is in [`src/evaluation/refedit_bench_viescore.py`](./src/evaluation/refedit_bench_viescore.py), with mask, crop, and score-summary helpers in [`src/evaluation/metrics.py`](./src/evaluation/metrics.py). Scoring uses the original `metadata.edit_instruction_single`, the GT polygon mask, and a tight shared ROI crop before scoring with VIEScore `task="tie"` and GPT-4o. Configure `VIESCORE_ROOT` and `VIESCORE_KEY_PATH` to enable scoring; keep the key file local and uncommitted.
+
+Use the [RefEdit-Bench text vs. mixed comparison notebook](./src/notebooks/metrics/refedit_bench_compare_text_mixed.ipynb) to pair saved ViEScore rows by sample, report per-metric wins, and visualize text-winning cases with mixed visual-prompt annotations. Expand each case's text or mixed agent trace to inspect its observations, thoughts, actions, and execution results. It selects the latest run in each prompt family by default; the same run environment variables above can select specific runs.
 
 ## Annotation and Visualization
 
-The annotation pipeline is available as `annotation`; its benchmark notebooks share settings, Hugging Face loading, schema checks, resumable conversion, and audit handling through `annotation.workflows`. Visualization/browser helpers are in `visualization`. Use `uv sync --extra visualize` for notebook plotting dependencies. Run annotations with the [CompBench](./src/notebooks/compbench_annotation.ipynb), [MagicBrush](./src/notebooks/magicbrush_annotation.ipynb), or [RefEdit-Bench](./src/notebooks/refedit_bench_annotation.ipynb) annotation notebook. Copy `.env.example` to `.env` and set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`); optional settings control limits, streaming, grounding thresholds, split, and output location. Explore annotations with the matching [CompBench](./src/notebooks/compbench_visualization.ipynb), [MagicBrush](./src/notebooks/magicbrush_visualization.ipynb), or [RefEdit-Bench](./src/notebooks/refedit_bench_visualization.ipynb) visualization notebook. [Annotation statistics](./src/notebooks/annotations_statistics.ipynb) summarizes the generated annotations; [tools_demo.ipynb](./src/notebooks/tools_demo.ipynb) demonstrates the editing tools. Generated JSONL/assets are kept locally in `.out/annotation/` (ignored by Git). Sync audit entries against successful records and sort by original dataset row with `uv run python -m scripts.sync_annotations compbench` (also accepts `magicbrush` and `refedit_bench`); it previews by default, and `--apply` writes both changes. Backfill visual prompt geometry for a benchmark with `uv run python -m scripts.backfill_visual_prompts compbench` (also accepts `magicbrush` and `refedit_bench`).
+The annotation pipeline is available as `annotation`; its benchmark notebooks share settings, Hugging Face loading, schema checks, resumable conversion, and audit handling through `annotation.workflows`. Visualization/browser helpers are in `visualization`. Use `uv sync --extra visualize` for notebook plotting dependencies. Run annotations with the [CompBench](./src/notebooks/compbench_annotation.ipynb), [MagicBrush](./src/notebooks/magicbrush_annotation.ipynb), or [RefEdit-Bench](./src/notebooks/annotation/refedit_bench_annotation.ipynb) annotation notebook. Each annotation notebook creates a separate `.out/annotation/<benchmark>/run_<timestamp>/` folder by default; set `RESUME_LAST_RUN = True` in its setup/run cell to continue the latest run, skipping completed samples and retrying audited failures. Set `ANNOTATE_OUT` to use a different output root. For RefEdit, `MASK_FROM_START` in the notebook setup cell overrides `REFEDIT_MASK_FROM_START` from `.env`; when false, parsing starts text-only, but conditional mask-guided retry still applies when the text parse is ambiguous or yields no usable reference. Copy `.env.example` to `.env`, set `RANDOM_SEED`, and set `GEMINI_API_KEY` (or `GOOGLE_API_KEY`); optional settings control limits, streaming, grounding thresholds, split, and output location. Explore annotations with the matching [CompBench](./src/notebooks/compbench_visualization.ipynb), [MagicBrush](./src/notebooks/magicbrush_visualization.ipynb), or [RefEdit-Bench](./src/notebooks/refedit_bench_visualization.ipynb) visualization notebook. [Annotation statistics](./src/notebooks/annotations_statistics.ipynb) summarizes the generated annotations; [tools_demo.ipynb](./src/notebooks/tools_demo.ipynb) demonstrates the editing tools. Generated JSONL/assets are kept locally in `.out/annotation/` (ignored by Git). Sync audit entries against successful records and sort by original dataset row with `uv run python -m scripts.sync_annotations compbench` (also accepts `magicbrush` and `refedit_bench`); it previews by default, and `--apply` writes both changes. Backfill visual prompt geometry for a benchmark with `uv run python -m scripts.backfill_visual_prompts compbench` (also accepts `magicbrush` and `refedit_bench`).
+
+For mask-guided RefEdit annotations, the mask may identify a relational anchor rather than the object being edited. In that case the parser marks the masked person/entity as an `anchor` and leaves the separately named edit target in the instruction; directly masked edit targets remain `target` references. Replacement instructions use the existing source object as the reference, not the requested replacement. If a masked retry returns no source-present entity, an unambiguous text-first reference is retained; otherwise the audit records each parse mode, entity count, span, role, and source-presence flag.
 
 ## Register a Tool
 

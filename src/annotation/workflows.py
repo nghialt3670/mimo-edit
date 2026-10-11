@@ -2,15 +2,59 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from framework.utils.project import load_project_environment
+from framework.utils.randomness import seed_random_generators
 
 from .core import Annotator
 from .grounder import GroundingDinoGrounder, HybridGrounder, MaskOnlyGrounder
 from .parser import GoogleParser
 from .runner import Adapter, convert_rows
+
+
+def create_annotation_run_directory(output_root: str | Path) -> Path:
+    """Create a unique timestamped directory for one annotation run."""
+    output_root = Path(output_root).expanduser().resolve()
+    output_root.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    suffix = 1
+    while True:
+        suffix_text = "" if suffix == 1 else f"_{suffix:06d}"
+        run_dir = output_root / f"run_{timestamp}{suffix_text}"
+        try:
+            run_dir.mkdir()
+        except FileExistsError:
+            suffix += 1
+            continue
+        return run_dir
+
+
+def resolve_annotation_run_directory(
+    output_root: str | Path,
+    run_name: str | None = None,
+) -> Path:
+    """Resolve an annotation run, defaulting to the latest timestamped run."""
+    output_root = Path(output_root).expanduser().resolve()
+    if run_name == "latest" or run_name is None:
+        run_dirs = sorted(path for path in output_root.glob("run_*") if path.is_dir())
+        if run_dirs:
+            return run_dirs[-1]
+        raise FileNotFoundError(
+            f"No annotation runs found under {output_root}. "
+            "Run the annotation notebook once before continuing."
+        )
+
+    if Path(run_name).name != run_name or not run_name.startswith("run_"):
+        raise ValueError(
+            "run_name must be 'latest' or a run_<timestamp> directory name."
+        )
+    run_dir = (output_root / run_name).resolve()
+    if run_dir.parent != output_root or not run_dir.is_dir():
+        raise FileNotFoundError(f"Annotation run directory not found: {run_dir}")
+    return run_dir
 
 
 @dataclass(frozen=True)
@@ -23,6 +67,7 @@ class AnnotationConfig:
     box_threshold: float = 0.35
     text_threshold: float = 0.25
     hf_token: str | None = None
+    refedit_mask_from_start: bool = False
 
     @classmethod
     def from_env(
@@ -30,6 +75,7 @@ class AnnotationConfig:
         benchmark: str,
     ) -> AnnotationConfig:
         project_root = load_project_environment()
+        seed_random_generators()
         default_directories = {
             "compbench": "compbench",
             "magicbrush": "magicbrush",
@@ -65,6 +111,10 @@ class AnnotationConfig:
             box_threshold=box_threshold,
             text_threshold=text_threshold,
             hf_token=os.environ.get("HF_TOKEN") or None,
+            refedit_mask_from_start=os.environ.get("REFEDIT_MASK_FROM_START", "0")
+            .strip()
+            .lower()
+            in {"1", "true", "yes", "on"},
         )
 
     def create_annotator(self, *, use_grounder: bool) -> Annotator:
@@ -80,7 +130,11 @@ class AnnotationConfig:
             )
         else:
             grounder = MaskOnlyGrounder()
-        return Annotator(parser=parser, grounder=grounder)
+        return Annotator(
+            parser=parser,
+            grounder=grounder,
+            refedit_mask_from_start=self.refedit_mask_from_start,
+        )
 
 
 def comma_separated_env(name: str, default: str) -> set[str]:

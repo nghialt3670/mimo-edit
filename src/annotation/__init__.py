@@ -20,7 +20,9 @@ from .schema import (
 from .workflows import (
     AnnotationConfig,
     comma_separated_env,
+    create_annotation_run_directory,
     run_hf_annotation,
+    resolve_annotation_run_directory,
     selected_rows,
 )
 
@@ -42,10 +44,12 @@ __all__ = [
     "convert_rows",
     "AnnotationConfig",
     "comma_separated_env",
+    "create_annotation_run_directory",
     "locate_spans",
     "magicbrush",
     "refedit_bench",
     "replace_spans",
     "run_hf_annotation",
+    "resolve_annotation_run_directory",
     "selected_rows",
 ]

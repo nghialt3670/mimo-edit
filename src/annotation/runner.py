@@ -94,19 +94,22 @@ def convert_rows(
             accepted_ids.add(sample_id)
         except NoReferenceError as exc:
             counts["skipped"] += 1
+            audit_record = {
+                "status": "skipped",
+                "row_index": i,
+                "sample_id": getattr(sample, "sample_id", None),
+                "instruction": getattr(
+                    sample,
+                    "instruction",
+                    row.get("editing_instruction") or row.get("instruction"),
+                ),
+                "error": str(exc),
+            }
+            if exc.parse_attempts:
+                audit_record["parse_attempts"] = exc.parse_attempts
             append_jsonl(
                 failures,
-                {
-                    "status": "skipped",
-                    "row_index": i,
-                    "sample_id": getattr(sample, "sample_id", None),
-                    "instruction": getattr(
-                        sample,
-                        "instruction",
-                        row.get("editing_instruction") or row.get("instruction"),
-                    ),
-                    "error": str(exc),
-                },
+                audit_record,
             )
             if sample is not None:
                 previous_status[str(sample.sample_id)] = "skipped"

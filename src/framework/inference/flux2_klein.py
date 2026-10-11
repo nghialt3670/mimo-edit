@@ -1,8 +1,4 @@
-"""Production editing and insertion helpers for FLUX.2 Klein 4B.
-
-Masked edits and box insertion use Flux2KleinPipeline (ordinary image editing).
-Mask insertion uses Flux2KleinInpaintPipeline (native inpainting).
-"""
+"""Production editing and insertion helpers for FLUX.2 Klein 4B."""
 
 from __future__ import annotations
 
@@ -14,11 +10,14 @@ import torch
 from PIL import Image, ImageChops, ImageFilter, ImageOps
 from scipy.ndimage import maximum_filter
 
+from framework.utils.randomness import get_random_seed
+
+from .config import KleinInferenceConfig
 from .pool import ModelPool
 from .utils import validate_number_range
 
 if TYPE_CHECKING:
-    from diffusers import Flux2KleinInpaintPipeline, Flux2KleinPipeline
+    from diffusers import Flux2KleinPipeline
 
 
 def _editing_prompt(
@@ -80,8 +79,12 @@ def flux2_klein_edit_object(
     current = image.convert("RGB")
     instruction = _editing_prompt(prompt, mode, bounds)
 
+    pipeline = pool.flux2_klein_pipeline
+    config = pool.config.klein
     if mode == "global":
-        edited = pool.klein.edit(current, instruction)
+        edited = _generate_klein_edit(
+            pipeline, current, instruction, config
+        )
         if edited.size != current.size:
             edited = edited.resize(current.size, Image.Resampling.LANCZOS)
         return edited.convert("RGB")
@@ -121,7 +124,7 @@ def flux2_klein_edit_object(
         ImageFilter.GaussianBlur(radius=feather_radius)
     )
     composite_mask = ImageChops.lighter(allowed_mask, feathered_mask)
-    edited_crop = pool.klein.edit(original_crop, instruction)
+    edited_crop = _generate_klein_edit(pipeline, original_crop, instruction, config)
     if edited_crop.size != original_crop.size:
         edited_crop = edited_crop.resize(original_crop.size, Image.Resampling.LANCZOS)
 
@@ -129,14 +132,30 @@ def flux2_klein_edit_object(
     return current
 
 
+def _generate_klein_edit(
+    pipeline: Flux2KleinPipeline,
+    image: Image.Image,
+    prompt: str,
+    config: KleinInferenceConfig,
+) -> Image.Image:
+    with torch.inference_mode():
+        return (
+            pipeline(
+                image=image,
+                prompt=prompt,
+                num_inference_steps=config.num_inference_steps,
+                guidance_scale=config.guidance_scale,
+                generator=torch.Generator(device="cpu").manual_seed(get_random_seed()),
+            )
+            .images[0]
+            .convert("RGB")
+        )
+
+
 # Shared settings for distilled FLUX.2 Klein 4B.
 PADDING_FRAC = 0.60
 WORK_SIZE = 1024
-NUM_INFERENCE_STEPS = 4
-GUIDANCE_SCALE = 1.0
-SEED = 0
 EDGE_BLEND_PX = 12
-INPAINT_STRENGTH = 1.0
 
 
 def _edge_padded_crop(
@@ -173,6 +192,8 @@ def flux2_klein_add_object_with_box(
     image: Image.Image,
     box: Sequence[float],
     prompt: str,
+    *,
+    config: KleinInferenceConfig | None = None,
 ) -> Image.Image:
     """Add an object near an XYXY pixel box and paste the entire edited crop."""
     if not isinstance(image, Image.Image):
@@ -204,15 +225,16 @@ def flux2_klein_add_object_with_box(
     wh = max(64, round(ch * scale / 16) * 16)
 
     with torch.inference_mode():
+        inference_config = config or KleinInferenceConfig()
         edited = (
             pipe(
                 image=cropped.resize((ww, wh), Image.Resampling.LANCZOS),
                 prompt=f"Add {prompt} to the center.",
                 height=wh,
                 width=ww,
-                num_inference_steps=NUM_INFERENCE_STEPS,
-                guidance_scale=GUIDANCE_SCALE,
-                generator=torch.Generator(device="cpu").manual_seed(SEED),
+                num_inference_steps=inference_config.num_inference_steps,
+                guidance_scale=inference_config.guidance_scale,
+                generator=torch.Generator(device="cpu").manual_seed(get_random_seed()),
             )
             .images[0]
             .convert("RGB")
@@ -238,16 +260,14 @@ def flux2_klein_add_object_with_box(
 
 
 def flux2_klein_add_object_with_mask(
-    pipe: Flux2KleinInpaintPipeline,
+    pipe: Flux2KleinPipeline,
     image: Image.Image,
     mask: Image.Image,
     prompt: str,
+    *,
+    config: KleinInferenceConfig | None = None,
 ) -> Image.Image:
-    """Inpaint white mask pixels, preserving every pixel outside the mask.
-
-    Uses Diffusers' padding_mask_crop for region selection and paste-back.
-    White = add object; black = retain source image.
-    """
+    """Generate inside a white mask, preserving every pixel outside the mask."""
     if not isinstance(image, Image.Image) or not isinstance(mask, Image.Image):
         raise TypeError("image and mask must both be PIL images")
     if not isinstance(prompt, str) or not prompt.strip():
@@ -264,42 +284,32 @@ def flux2_klein_add_object_with_mask(
     if region is None:
         raise ValueError("mask is empty")
 
-    # Klein's inpaint pipeline reduces images over 1 MP internally. Resize
-    # both image and mask together first so the built-in crop stays aligned.
-    if max(original.size) > WORK_SIZE:
-        working_image = ImageOps.contain(original, (WORK_SIZE, WORK_SIZE))
-        working_mask = mask.resize(working_image.size, Image.Resampling.NEAREST)
-    else:
-        working_image, working_mask = original, mask
+    inference_config = config or KleinInferenceConfig()
+    left, top, right, bottom = region
+    padding = inference_config.mask_context_padding
+    crop_box = (
+        max(0, left - padding),
+        max(0, top - padding),
+        min(original.width, right + padding),
+        min(original.height, bottom + padding),
+    )
+    original_crop = original.crop(crop_box)
+    working_image = ImageOps.contain(original_crop, (WORK_SIZE, WORK_SIZE))
 
-    if working_mask.getbbox() is None:
-        raise ValueError("mask became empty after resizing")
-    x1, y1, x2, y2 = working_mask.getbbox()
-    padding = math.ceil(max(x2 - x1, y2 - y1) * PADDING_FRAC)
-
-    with torch.inference_mode():
-        edited = (
-            pipe(
-                image=working_image,
-                mask_image=working_mask,
-                prompt=f"Add {prompt} inside the masked region. Preserve the surroundings.",
-                padding_mask_crop=padding,
-                strength=INPAINT_STRENGTH,
-                num_inference_steps=NUM_INFERENCE_STEPS,
-                guidance_scale=GUIDANCE_SCALE,
-                generator=torch.Generator(device="cpu").manual_seed(SEED),
-            )
-            .images[0]
-            .convert("RGB")
-        )
-
+    edited = _generate_klein_edit(
+        pipe,
+        working_image,
+        f"Add {prompt} inside the selected region. Preserve the surroundings.",
+        inference_config,
+    )
     if edited.size != working_image.size:
         raise ValueError(f"Klein returned {edited.size}, expected {working_image.size}")
-    # Native crop overlay already restores the background. Enforce the
-    # original mask once more so no pixels outside it can change.
-    return Image.composite(
-        edited.resize(original.size, Image.Resampling.LANCZOS), original, mask
-    )
+
+    crop_mask = mask.crop(crop_box)
+    edited_crop = edited.resize(original_crop.size, Image.Resampling.LANCZOS)
+    result = original.copy()
+    result.paste(edited_crop, crop_box[:2], crop_mask)
+    return result
 
 
 __all__ = [

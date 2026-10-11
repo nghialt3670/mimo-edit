@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from PIL import Image
 
+from framework.utils.randomness import get_random_seed
+
 from .pool import ModelPool
 
 
@@ -24,12 +26,14 @@ def object_clear_remove_object(
         max(1, round(source.width * scale)),
         max(1, round(source.height * scale)),
     )
-    pipeline = pool.object_clear
+    pipeline = pool.object_clear_pipeline
     result = pipeline(
         prompt=prompt or "remove the instance of object",
         image=source.resize(working_size, Image.Resampling.BILINEAR),
         mask_image=normalized_mask.resize(working_size, Image.Resampling.NEAREST),
-        generator=torch.Generator(device=pipeline.unet.device).manual_seed(config.seed),
+        generator=torch.Generator(device=pipeline.unet.device).manual_seed(
+            get_random_seed()
+        ),
         num_inference_steps=config.num_inference_steps,
         guidance_scale=config.guidance_scale,
         height=working_size[1],
