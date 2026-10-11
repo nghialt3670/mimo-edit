@@ -6,7 +6,6 @@ from pathlib import Path
 
 from framework.utils.project import load_project_environment
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SUPPORTED_BENCHMARKS = ("compbench", "magicbrush", "refedit_bench")
 

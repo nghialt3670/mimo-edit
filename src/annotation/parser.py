@@ -68,7 +68,9 @@ def _mask_overlay(image: Image.Image, mask: Image.Image) -> Image.Image:
 class GoogleParser:
     """Structured parser using the official google-genai SDK; no Instructor dependency."""
 
-    def __init__(self, model: str | None = None, api_key: str | None = None, max_retries: int = 2):
+    def __init__(
+        self, model: str | None = None, api_key: str | None = None, max_retries: int = 2
+    ):
         from google import genai
 
         raw = model or os.getenv("ANNOTATE_LLM", "google/gemini-2.5-flash-lite")
@@ -94,8 +96,14 @@ class GoogleParser:
             raise ValueError("Choose only one mask-guided parsing mode")
         if masked_reference_only or mask_guided_spatial_reference:
             if image is None or mask is None:
-                raise ValueError("Mask-guided parsing requires both the source image and its mask")
-            prompt = MASKED_REFERENCE_PROMPT if masked_reference_only else MASKED_SPATIAL_REFERENCE_PROMPT
+                raise ValueError(
+                    "Mask-guided parsing requires both the source image and its mask"
+                )
+            prompt = (
+                MASKED_REFERENCE_PROMPT
+                if masked_reference_only
+                else MASKED_SPATIAL_REFERENCE_PROMPT
+            )
             system_instruction += "\n" + prompt
             from io import BytesIO
 
@@ -103,7 +111,9 @@ class GoogleParser:
             _mask_overlay(image, mask).save(image_buffer, format="PNG")
             contents = [
                 f"Instruction:\n{instruction}",
-                types.Part.from_bytes(data=image_buffer.getvalue(), mime_type="image/png"),
+                types.Part.from_bytes(
+                    data=image_buffer.getvalue(), mime_type="image/png"
+                ),
             ]
 
         def call() -> ParsedInstruction:

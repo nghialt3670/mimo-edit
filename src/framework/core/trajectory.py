@@ -28,7 +28,9 @@ def clean_trajectory(steps: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         # send_message is terminal for one turn. The next Observation is the next user message.
         if not step.get("is_final_answer"):
-            observation = _parse_observation(step.get("observations"), step.get("error"))
+            observation = _parse_observation(
+                step.get("observations"), step.get("error")
+            )
             if observation is not None:
                 record["observation"] = observation
 
@@ -72,7 +74,11 @@ def _parse_observation(value: Any, error: Any = None) -> Any | None:
         except Exception:
             pass
     if error is not None:
-        return {"type": "execution_error", "text": str(value or ""), "error": str(error)}
+        return {
+            "type": "execution_error",
+            "text": str(value or ""),
+            "error": str(error),
+        }
     return value
 
 

@@ -27,7 +27,9 @@ def _load_resume_state(output: Path, failures: Path) -> tuple[set[str], dict[str
                 try:
                     record = json.loads(line)
                 except json.JSONDecodeError as exc:
-                    raise ValueError(f"Invalid JSONL in {path} at line {line_number}") from exc
+                    raise ValueError(
+                        f"Invalid JSONL in {path} at line {line_number}"
+                    ) from exc
                 sample_id = record.get("sample_id")
                 if sample_id is None:
                     continue
@@ -56,7 +58,9 @@ def convert_rows(
     audit files, so repeated runs continue through the dataset.
     """
     output = Path(output)
-    failures = Path(failures) if failures else output.with_name(output.stem + "_audit.jsonl")
+    failures = (
+        Path(failures) if failures else output.with_name(output.stem + "_audit.jsonl")
+    )
     output.parent.mkdir(parents=True, exist_ok=True)
     accepted_ids, previous_status = _load_resume_state(output, failures)
 
@@ -96,7 +100,11 @@ def convert_rows(
                     "status": "skipped",
                     "row_index": i,
                     "sample_id": getattr(sample, "sample_id", None),
-                    "instruction": getattr(sample, "instruction", row.get("editing_instruction") or row.get("instruction")),
+                    "instruction": getattr(
+                        sample,
+                        "instruction",
+                        row.get("editing_instruction") or row.get("instruction"),
+                    ),
                     "error": str(exc),
                 },
             )
@@ -110,7 +118,11 @@ def convert_rows(
                     "status": "failed",
                     "row_index": i,
                     "sample_id": getattr(sample, "sample_id", None),
-                    "instruction": getattr(sample, "instruction", row.get("editing_instruction") or row.get("instruction")),
+                    "instruction": getattr(
+                        sample,
+                        "instruction",
+                        row.get("editing_instruction") or row.get("instruction"),
+                    ),
                     "error_type": type(exc).__name__,
                     "error": str(exc),
                 },

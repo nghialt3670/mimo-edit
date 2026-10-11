@@ -2,34 +2,47 @@ from __future__ import annotations
 
 from PIL import Image
 
-from framework.utils.image import paste_layer
-from framework.inference import ModelCache, remove_with_object_clear
+from framework.inference.object_clear import object_clear_remove_object
+
+from ..context import ToolContext
 from ..registry import register_tool
+from ..utils import paste_layer, validate_image, validate_mask
+
+
+def _validate_replace_object_args(
+    image: Image.Image,
+    mask: Image.Image,
+    replacement: Image.Image,
+) -> None:
+    validate_image("image", image)
+    validate_mask(image, mask)
+    validate_image("replacement", replacement)
 
 
 @register_tool(
     "replace_object",
-    "Replace one masked object with one provided image. The replacement is resized to fit the mask bounds.",
+    "Replace the selected object with another image.",
     {
-        "image": {"type": "image", "description": "Source image."},
-        "mask": {"type": "image", "description": "One Pillow mask selecting the object to replace."},
-        "replacement": {"type": "image", "description": "Pillow image to place in the selected object's bounds."},
+        "image": {"type": "image", "description": "Image to edit."},
+        "mask": {
+            "type": "image",
+            "description": "Mask selecting the object to replace.",
+        },
+        "replacement": {
+            "type": "image",
+            "description": "Image to place in the selected area.",
+        },
     },
     "image",
 )
 def replace_object(
-    models: ModelCache,
+    ctx: ToolContext,
     image: Image.Image,
     mask: Image.Image,
     replacement: Image.Image,
 ) -> Image.Image:
-    clean = remove_with_object_clear(
-        models,
-        image,
-        mask,
-        "remove the selected object",
-        model_key="replace_object",
-    )
+    _validate_replace_object_args(image, mask, replacement)
+    clean = object_clear_remove_object(ctx.model_pool, image, mask)
     bounds = mask.convert("L").resize(image.size, Image.Resampling.NEAREST).getbbox()
     if bounds is None:
         raise ValueError("mask is empty")

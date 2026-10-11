@@ -6,9 +6,10 @@ from inspect import Parameter, Signature, _empty
 from types import MethodType
 from typing import Any
 
-from smolagents import Tool
 from PIL import Image
+from smolagents import Tool
 
+from .context import ToolContext
 
 Handler = Callable[..., Any]
 
@@ -49,17 +50,19 @@ class ToolRegistry:
         def decorate(handler: Handler) -> Handler:
             if name in self._specs:
                 raise ValueError(f"Tool already registered: {name}")
-            self._specs[name] = ToolSpec(name, description, inputs, output_type, handler)
+            self._specs[name] = ToolSpec(
+                name, description, inputs, output_type, handler
+            )
             return handler
 
         return decorate
 
-    def build(self, context: Any = None) -> list[Tool]:
+    def build(self, context: ToolContext | None = None) -> list[Tool]:
         return [_RegisteredTool(spec, context) for spec in self._specs.values()]
 
 
 class _RegisteredTool(Tool):
-    def __init__(self, spec: ToolSpec, context: Any):
+    def __init__(self, spec: ToolSpec, context: ToolContext | None):
         self.spec = spec
         self.context = context
         self.name = spec.name
@@ -101,9 +104,7 @@ class _RegisteredTool(Tool):
 
         call_signature = Signature(call_parameters)
 
-        def dispatch(
-            _self: _RegisteredTool, *args: Any, **kwargs: Any
-        ) -> Any:
+        def dispatch(_self: _RegisteredTool, *args: Any, **kwargs: Any) -> Any:
             bound = call_signature.bind(*args, **kwargs)
             bound.apply_defaults()
             return spec.handler(context, **bound.arguments)
@@ -114,9 +115,10 @@ class _RegisteredTool(Tool):
         self.forward = MethodType(forward, self)
         super().__init__()
 
+
 registry = ToolRegistry()
 register_tool = registry.register
 
 
-def build_tools(context: Any = None) -> list[Tool]:
+def build_tools(context: ToolContext | None = None) -> list[Tool]:
     return registry.build(context)

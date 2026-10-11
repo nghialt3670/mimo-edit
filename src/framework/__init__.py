@@ -1,13 +1,25 @@
 """Image-editing agent framework."""
 
 from .core import Agent, Message, RunResult, TurnResult, local_executor
-from .tools import ModelCache, ModelConfig, image_editing_tools
+from .tools import (
+    InferenceConfig,
+    KleinInferenceConfig,
+    ModelPool,
+    ObjectClearInferenceConfig,
+    Sam3InferenceConfig,
+    ToolContext,
+    image_editing_tools,
+)
 
 __all__ = [
     "Agent",
     "Message",
-    "ModelCache",
-    "ModelConfig",
+    "ModelPool",
+    "InferenceConfig",
+    "KleinInferenceConfig",
+    "ObjectClearInferenceConfig",
+    "Sam3InferenceConfig",
+    "ToolContext",
     "RunResult",
     "TurnResult",
     "image_editing_tools",

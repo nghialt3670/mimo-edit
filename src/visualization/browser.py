@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import atexit
-from difflib import SequenceMatcher
 import html
 import json
-from pathlib import Path
 import re
+from difflib import SequenceMatcher
+from pathlib import Path
 from typing import Any
 
 from PIL import Image
@@ -23,7 +23,9 @@ def load_annotations(path: str | Path) -> list[dict[str, Any]]:
             try:
                 records.append(json.loads(line))
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSONL in {path} at line {line_number}") from exc
+                raise ValueError(
+                    f"Invalid JSONL in {path} at line {line_number}"
+                ) from exc
     return records
 
 
@@ -79,7 +81,9 @@ class HuggingFaceRowImageLoader:
             try:
                 row = next(self._iterator)
             except StopIteration as exc:
-                raise IndexError(f"Dataset row {row_index} is unavailable in {dataset_id}/{split}") from exc
+                raise IndexError(
+                    f"Dataset row {row_index} is unavailable in {dataset_id}/{split}"
+                ) from exc
             self._next_index += 1
         assert row is not None
         return row
@@ -101,7 +105,9 @@ class HuggingFaceRowImageLoader:
                     return image.convert("RGB")
         return None
 
-    def load(self, record: dict[str, Any]) -> tuple[Image.Image | None, Image.Image | None]:
+    def load(
+        self, record: dict[str, Any]
+    ) -> tuple[Image.Image | None, Image.Image | None]:
         source_ref = self._parse_reference(record.get("source_ref"))
         target_ref = self._parse_reference(record.get("target_ref"))
         if source_ref is None:
@@ -114,7 +120,11 @@ class HuggingFaceRowImageLoader:
         target = None
         if target_ref is not None:
             target_dataset, target_split, target_index, target_field = target_ref
-            if (target_dataset, target_split, target_index) == (dataset_id, split, row_index):
+            if (target_dataset, target_split, target_index) == (
+                dataset_id,
+                split,
+                row_index,
+            ):
                 target = self._as_image(row.get(target_field))
             else:
                 target_row = self._row_at(target_dataset, target_split, target_index)
@@ -136,7 +146,9 @@ def _load_asset(value: str | None, base_dir: Path) -> Image.Image | None:
 def _highlight_original_instruction(record: dict[str, Any]) -> str:
     original = str(record.get("original_instruction", ""))
     references = record.get("references", [])
-    parser_instruction = record.get("parser_instruction") or record.get("metadata", {}).get("edit_instruction_single")
+    parser_instruction = record.get("parser_instruction") or record.get(
+        "metadata", {}
+    ).get("edit_instruction_single")
     spans: list[tuple[int, int]] = []
     search_from = 0
 
@@ -150,16 +162,29 @@ def _highlight_original_instruction(record: dict[str, Any]) -> str:
 
     if parser_instruction and parser_instruction != original:
         original_words = list(WORD_RE.finditer(original))
-        parser_words = [match.group().casefold() for match in WORD_RE.finditer(parser_instruction)]
+        parser_words = [
+            match.group().casefold() for match in WORD_RE.finditer(parser_instruction)
+        ]
         original_word_values = [match.group().casefold() for match in original_words]
-        matcher = SequenceMatcher(None, original_word_values, parser_words, autojunk=False)
+        matcher = SequenceMatcher(
+            None, original_word_values, parser_words, autojunk=False
+        )
         for operation, original_start, original_end, _, _ in matcher.get_opcodes():
             if operation == "delete" and original_start < original_end:
-                spans.append((original_words[original_start].start(), original_words[original_end - 1].end()))
+                spans.append(
+                    (
+                        original_words[original_start].start(),
+                        original_words[original_end - 1].end(),
+                    )
+                )
     else:
         for reference in references:
             start, end = reference.get("start"), reference.get("end")
-            if isinstance(start, int) and isinstance(end, int) and 0 <= start < end <= len(original):
+            if (
+                isinstance(start, int)
+                and isinstance(end, int)
+                and 0 <= start < end <= len(original)
+            ):
                 if original[start:end] == reference.get("span"):
                     spans.append((start, end))
 
@@ -173,7 +198,12 @@ def _highlight_original_instruction(record: dict[str, Any]) -> str:
     pieces: list[str] = []
     cursor = 0
     for start, end in merged_spans:
-        pieces.extend((html.escape(original[cursor:start]), f"<strong>{html.escape(original[start:end])}</strong>"))
+        pieces.extend(
+            (
+                html.escape(original[cursor:start]),
+                f"<strong>{html.escape(original[start:end])}</strong>",
+            )
+        )
         cursor = end
     pieces.append(html.escape(original[cursor:]))
     return "".join(pieces)
@@ -196,19 +226,23 @@ def _display_details(record: dict[str, Any], source_error: str | None) -> None:
         f"### {record.get('benchmark', 'Benchmark')} / {record.get('sample_id', 'sample')}",
         f"**Split:** `{record.get('split', '')}`",
         "",
-        "<div style=\"margin: 8px 0 4px; color: #171717; font-weight: 700;\">Original instruction</div>",
-        f"<div style=\"background-color: #f1f3f4; color: #171717; padding: 10px 14px; border-left: 4px solid #00798c; line-height: 1.6;\">{_highlight_original_instruction(record)}</div>",
+        '<div style="margin: 8px 0 4px; color: #171717; font-weight: 700;">Original instruction</div>',
+        f'<div style="background-color: #f1f3f4; color: #171717; padding: 10px 14px; border-left: 4px solid #00798c; line-height: 1.6;">{_highlight_original_instruction(record)}</div>',
     ]
-    lines.extend((
-        "",
-        "<div style=\"margin: 10px 0 4px; color: #171717; font-weight: 700;\">Mixed instruction</div>",
-    ))
-    lines.extend((
-        f"<div style=\"background-color: #f1f3f4; color: #171717; padding: 10px 14px; border-left: 4px solid #d1495b; line-height: 1.6;\">{_highlight_mixed_instruction(record)}</div>",
-        "",
-        f"**Source:** `{record.get('source_ref')}`  ",
-        f"**Target:** `{record.get('target_ref')}`",
-    ))
+    lines.extend(
+        (
+            "",
+            '<div style="margin: 10px 0 4px; color: #171717; font-weight: 700;">Mixed instruction</div>',
+        )
+    )
+    lines.extend(
+        (
+            f'<div style="background-color: #f1f3f4; color: #171717; padding: 10px 14px; border-left: 4px solid #d1495b; line-height: 1.6;">{_highlight_mixed_instruction(record)}</div>',
+            "",
+            f"**Source:** `{record.get('source_ref')}`  ",
+            f"**Target:** `{record.get('target_ref')}`",
+        )
+    )
     if source_error:
         lines.extend(("", f"> Source/target reload failed: `{source_error}`"))
 
@@ -227,11 +261,17 @@ def _display_details(record: dict[str, Any], source_error: str | None) -> None:
         )
 
     lines.extend(("", "#### Validation and metadata", "```json"))
-    lines.append(json.dumps({
-        "validation": record.get("validation", {}),
-        "linguistic_stats": record.get("linguistic_stats", {}),
-        "metadata": record.get("metadata", {}),
-    }, ensure_ascii=False, indent=2))
+    lines.append(
+        json.dumps(
+            {
+                "validation": record.get("validation", {}),
+                "linguistic_stats": record.get("linguistic_stats", {}),
+                "metadata": record.get("metadata", {}),
+            },
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     lines.append("```")
     display(Markdown("\n".join(lines)))
 
@@ -254,49 +294,118 @@ def show_annotation(
             source_error = f"{type(exc).__name__}: {exc}"
 
     references = record.get("references", [])
-    figure, axes = plt.subplots(max(1, 1 + len(references)), 4, figsize=(21, 5 + 3.5 * len(references)), squeeze=False)
+    figure, axes = plt.subplots(
+        max(1, 1 + len(references)),
+        4,
+        figsize=(21, 5 + 3.5 * len(references)),
+        squeeze=False,
+    )
     figure.patch.set_facecolor("#f4f3ee")
 
-    role_colors = {"target": "#d1495b", "anchor": "#00798c", "source": "#edae49", "context": "#30638e"}
+    role_colors = {
+        "target": "#d1495b",
+        "anchor": "#00798c",
+        "source": "#edae49",
+        "context": "#30638e",
+    }
     for column, variant in enumerate(("box", "point", "scribble")):
         prompt_axis = axes[0][column]
         if source is None:
-            prompt_axis.text(0.5, 0.5, "Source image unavailable", ha="center", va="center")
+            prompt_axis.text(
+                0.5, 0.5, "Source image unavailable", ha="center", va="center"
+            )
         else:
             prompt_axis.imshow(source)
             for reference in references:
                 region = reference.get("region", {})
-                prompts = reference.get("visual_prompts", region.get("visual_prompts", {}))
+                prompts = reference.get(
+                    "visual_prompts", region.get("visual_prompts", {})
+                )
                 prompt = prompts.get(variant, {})
                 color = role_colors.get(reference.get("role"), "#00798c")
                 if variant == "box":
                     box = prompt.get("xyxy", region.get("bbox_xyxy"))
                     if box and len(box) == 4:
                         x0, y0, x1, y1 = box
-                        prompt_axis.add_patch(Rectangle((x0, y0), x1 - x0, y1 - y0, fill=False, edgecolor=color, linewidth=2))
-                        prompt_axis.text(x0, max(0, y0 - 4), reference.get("token", "ref"), color="white", fontsize=9, weight="bold", bbox={"facecolor": color, "edgecolor": "none", "pad": 2})
+                        prompt_axis.add_patch(
+                            Rectangle(
+                                (x0, y0),
+                                x1 - x0,
+                                y1 - y0,
+                                fill=False,
+                                edgecolor=color,
+                                linewidth=2,
+                            )
+                        )
+                        prompt_axis.text(
+                            x0,
+                            max(0, y0 - 4),
+                            reference.get("token", "ref"),
+                            color="white",
+                            fontsize=9,
+                            weight="bold",
+                            bbox={"facecolor": color, "edgecolor": "none", "pad": 2},
+                        )
                 elif variant == "point":
                     point = prompt.get("xy")
                     if point and len(point) == 2:
                         x, y = point
-                        prompt_axis.scatter([x], [y], s=110, marker="o", facecolors="none", edgecolors=color, linewidths=2)
+                        prompt_axis.scatter(
+                            [x],
+                            [y],
+                            s=110,
+                            marker="o",
+                            facecolors="none",
+                            edgecolors=color,
+                            linewidths=2,
+                        )
                         prompt_axis.scatter([x], [y], s=24, marker="o", color=color)
-                        prompt_axis.text(x + 4, y, reference.get("token", "ref"), color="white", fontsize=9, weight="bold", bbox={"facecolor": color, "edgecolor": "none", "pad": 2})
+                        prompt_axis.text(
+                            x + 4,
+                            y,
+                            reference.get("token", "ref"),
+                            color="white",
+                            fontsize=9,
+                            weight="bold",
+                            bbox={"facecolor": color, "edgecolor": "none", "pad": 2},
+                        )
                 else:
                     scribble = prompt.get("strokes", [])
                     width = prompt.get("stroke_width_px", 3)
                     for stroke in scribble:
                         if len(stroke) >= 2:
-                            prompt_axis.plot([point[0] for point in stroke], [point[1] for point in stroke], color=color, linewidth=width, solid_capstyle="round")
+                            prompt_axis.plot(
+                                [point[0] for point in stroke],
+                                [point[1] for point in stroke],
+                                color=color,
+                                linewidth=width,
+                                solid_capstyle="round",
+                            )
                     if scribble and scribble[0]:
                         x, y = scribble[0][0]
-                        prompt_axis.text(x, y, reference.get("token", "ref"), color="white", fontsize=9, weight="bold", bbox={"facecolor": color, "edgecolor": "none", "pad": 2})
-        prompt_axis.set_title({"box": "Box prompt", "point": "Point prompt", "scribble": "Scribble prompt"}[variant])
+                        prompt_axis.text(
+                            x,
+                            y,
+                            reference.get("token", "ref"),
+                            color="white",
+                            fontsize=9,
+                            weight="bold",
+                            bbox={"facecolor": color, "edgecolor": "none", "pad": 2},
+                        )
+        prompt_axis.set_title(
+            {
+                "box": "Box prompt",
+                "point": "Point prompt",
+                "scribble": "Scribble prompt",
+            }[variant]
+        )
         prompt_axis.axis("off")
 
     target_axis = axes[0][3]
     if target is None:
-        target_axis.text(0.5, 0.5, "No target image available", ha="center", va="center")
+        target_axis.text(
+            0.5, 0.5, "No target image available", ha="center", va="center"
+        )
     else:
         target_axis.imshow(target)
     target_axis.set_title("Benchmark target")
@@ -323,15 +432,17 @@ def show_annotation(
         detail_axis.text(
             0,
             1,
-            "\n".join((
-                f"Span: {reference.get('span')}",
-                f"Role: {reference.get('role')}",
-                f"Query: {reference.get('grounding_query')}",
-                f"Detected: {region.get('label')}",
-                f"Confidence: {region.get('confidence')}",
-                f"Box: {region.get('bbox_xyxy')}",
-                f"Box source: {region.get('source')}",
-            )),
+            "\n".join(
+                (
+                    f"Span: {reference.get('span')}",
+                    f"Role: {reference.get('role')}",
+                    f"Query: {reference.get('grounding_query')}",
+                    f"Detected: {region.get('label')}",
+                    f"Confidence: {region.get('confidence')}",
+                    f"Box: {region.get('bbox_xyxy')}",
+                    f"Box source: {region.get('source')}",
+                )
+            ),
             va="top",
             wrap=True,
             fontsize=10,
@@ -342,13 +453,15 @@ def show_annotation(
         geometry_axis.text(
             0,
             1,
-            "\n".join((
-                f"Geometry source: {prompts.get('geometry_source', 'not generated')}",
-                f"Box: {prompts.get('box', {}).get('xyxy', region.get('bbox_xyxy'))}",
-                f"Point: {prompts.get('point', {}).get('xy', 'not generated')}",
-                f"Scribble strokes: {len(scribble.get('strokes', []))}",
-                f"Scribble seed: {scribble.get('seed', 'not generated')}",
-            )),
+            "\n".join(
+                (
+                    f"Geometry source: {prompts.get('geometry_source', 'not generated')}",
+                    f"Box: {prompts.get('box', {}).get('xyxy', region.get('bbox_xyxy'))}",
+                    f"Point: {prompts.get('point', {}).get('xy', 'not generated')}",
+                    f"Scribble strokes: {len(scribble.get('strokes', []))}",
+                    f"Scribble seed: {scribble.get('seed', 'not generated')}",
+                )
+            ),
             va="top",
             wrap=True,
             fontsize=10,
@@ -369,18 +482,28 @@ class AnnotationBrowser:
         if not self.records:
             raise ValueError(f"No annotation records found in {self.annotation_file}")
         if index < 0 or index >= len(self.records):
-            raise IndexError(f"Sample index {index} is outside 0..{len(self.records) - 1}")
-        show_annotation(self.records[index], self.annotation_file.parent, self.image_loader)
+            raise IndexError(
+                f"Sample index {index} is outside 0..{len(self.records) - 1}"
+            )
+        show_annotation(
+            self.records[index], self.annotation_file.parent, self.image_loader
+        )
 
     def interact(self) -> None:
-        from IPython.display import clear_output, display
         import ipywidgets as widgets
+        from IPython.display import clear_output, display
 
         if not self.records:
             raise ValueError(f"No annotation records found in {self.annotation_file}")
         clear_output(wait=True)
         control = widgets.interactive(
             self.show,
-            index=widgets.BoundedIntText(min=0, max=len(self.records) - 1, value=0, description="Sample", continuous_update=False),
+            index=widgets.BoundedIntText(
+                min=0,
+                max=len(self.records) - 1,
+                value=0,
+                description="Sample",
+                continuous_update=False,
+            ),
         )
         display(control)

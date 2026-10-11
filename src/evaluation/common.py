@@ -205,7 +205,7 @@ def build_agent_context(sample: dict[str, Any]) -> str:
         "For each reference to an existing entity, call segment_object with its "
         "single supplied box, point, or scribble selector to create a mask before "
         "editing. A spatial destination is not an existing entity: use its supplied "
-        "box directly with generate_object, without calling segment_object. Never "
+        "box directly with add_object, without calling segment_object. Never "
         "use annotation masks or crops. Do not combine selector types for one reference. "
         "Apply edits to each required object in sequence and preserve unrelated "
         "image content.",
@@ -223,9 +223,7 @@ def build_agent_context(sample: dict[str, Any]) -> str:
         token = ref["token"] or f"reference_{index}"
         selected = ref.get("selected_prompt")
         description = ref.get("span")
-        description_line = (
-            f" refers to {description!r};" if description else ""
-        )
+        description_line = f" refers to {description!r};" if description else ""
         selector_line = ""
         if selected is not None:
             selector_line = (
@@ -236,7 +234,7 @@ def build_agent_context(sample: dict[str, Any]) -> str:
                 lines.append(
                     f"Reference {token}{description_line} denotes a spatial "
                     f"destination, not an entity to select; use {selector_line} "
-                    "directly as the box for generate_object."
+                    "directly as the box for add_object."
                 )
             else:
                 lines.append(
@@ -308,7 +306,9 @@ def annotate_sample(sample: dict[str, Any]) -> Image.Image:
             points = [(round(float(x)), round(float(y))) for x, y in value]
             if len(points) == 1:
                 x, y = points[0]
-                draw.ellipse((x - radius, y - radius, x + radius, y + radius), fill=color)
+                draw.ellipse(
+                    (x - radius, y - radius, x + radius, y + radius), fill=color
+                )
             elif points:
                 draw.line(points, fill=(0, 220, 255, 255), width=line_width * 2)
                 label_origin = points[0]
@@ -401,9 +401,7 @@ def json_safe(
         if hasattr(value, "model_dump"):
             return {
                 "__type__": type(value).__name__,
-                "data": json_safe(
-                    value.model_dump(), asset_dir, prefix, seen
-                ),
+                "data": json_safe(value.model_dump(), asset_dir, prefix, seen),
             }
         if hasattr(value, "to_dict"):
             return {
@@ -498,9 +496,7 @@ def run_one(
             verbosity_level=0,
         )
         result = agent.send(task, objects=objects)
-        images = [
-            obj for obj in result.message.objects if isinstance(obj, Image.Image)
-        ]
+        images = [obj for obj in result.message.objects if isinstance(obj, Image.Image)]
         if not images:
             raise RuntimeError(
                 "Agent completed without returning a Pillow image in "
@@ -550,9 +546,7 @@ def run_one(
             variables = agent.variables if agent is not None else {}
             trajectory_text_path.write_text(trajectory_text, encoding="utf-8")
             assets_dir = log_dir / "debug_assets"
-            serialized_variables = json_safe(
-                variables, assets_dir, "variables"
-            )
+            serialized_variables = json_safe(variables, assets_dir, "variables")
             variables_json_path.write_text(
                 json.dumps(
                     serialized_variables,

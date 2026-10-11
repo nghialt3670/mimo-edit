@@ -2,35 +2,55 @@ from __future__ import annotations
 
 from PIL import Image
 
-from framework.utils.image import masked_layer, paste_layer
-from framework.inference import ModelCache, remove_with_object_clear
+from framework.inference.object_clear import object_clear_remove_object
+
+from ..context import ToolContext
 from ..registry import register_tool
+from ..utils import (
+    masked_layer,
+    paste_layer,
+    validate_image,
+    validate_mask,
+    validate_text,
+)
+
+
+def _validate_flip_object_args(
+    image: Image.Image,
+    mask: Image.Image,
+    axis: str,
+) -> None:
+    validate_image("image", image)
+    validate_mask(image, mask)
+    validate_text("axis", axis)
+    if axis not in ("x", "y"):
+        raise ValueError("axis must be 'x' or 'y'")
 
 
 @register_tool(
     "flip_object",
-    "Flip one masked object horizontally ('x') or vertically ('y'), preserving its position.",
+    "Flip the selected object horizontally or vertically.",
     {
-        "image": {"type": "image", "description": "Source image."},
-        "mask": {"type": "image", "description": "One Pillow mask selecting the object."},
-        "axis": {"type": "string", "description": "'x' for horizontal or 'y' for vertical."},
+        "image": {"type": "image", "description": "Image to edit."},
+        "mask": {"type": "image", "description": "Mask selecting the object."},
+        "axis": {
+            "type": "string",
+            "description": "'x' for horizontal; 'y' for vertical.",
+        },
     },
     "image",
 )
 def flip_object(
-    models: ModelCache,
+    ctx: ToolContext,
     image: Image.Image,
     mask: Image.Image,
     axis: str,
 ) -> Image.Image:
+    _validate_flip_object_args(image, mask, axis)
     transpose = {
         "x": Image.Transpose.FLIP_LEFT_RIGHT,
         "y": Image.Transpose.FLIP_TOP_BOTTOM,
     }
-    if axis not in transpose:
-        raise ValueError("axis must be 'x' or 'y'")
     layer, origin = masked_layer(image, mask)
-    clean = remove_with_object_clear(
-        models, image, mask, "remove the selected object", model_key="flip_object"
-    )
+    clean = object_clear_remove_object(ctx.model_pool, image, mask)
     return paste_layer(clean, layer.transpose(transpose[axis]), origin)

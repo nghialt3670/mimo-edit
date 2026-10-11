@@ -36,7 +36,9 @@ def collect_saved_outputs(
                 continue
             index = result.get("annotation_index")
             if not isinstance(index, int) or not 0 <= index < len(records):
-                raise ValueError(f"Invalid annotation_index in {results_path}: {index!r}")
+                raise ValueError(
+                    f"Invalid annotation_index in {results_path}: {index!r}"
+                )
             if result.get("sample_id") != records[index].get("sample_id"):
                 raise ValueError(
                     f"Result/annotation mismatch at index {index}: "
@@ -61,7 +63,9 @@ def collect_saved_outputs(
                 f"Saved output filename refers to missing annotation index {index}: "
                 f"{output_path}"
             )
-        expected_name = f"{index:06d}_{_safe_sample_id(records[index].get('sample_id'))}_output.png"
+        expected_name = (
+            f"{index:06d}_{_safe_sample_id(records[index].get('sample_id'))}_output.png"
+        )
         if output_path.name != expected_name:
             raise ValueError(
                 f"Saved output filename does not match annotation {index}: "
@@ -131,12 +135,20 @@ def evaluate_saved_refedit_bench_outputs(
     if image_loader is None:
         image_loader = HFImageLoader()
     if scorer is None:
-        viescore_root = viescore_root or Path(os.environ.get("VIESCORE_ROOT", "")).expanduser()
-        key_path = key_path or Path(os.environ.get("VIESCORE_KEY_PATH", "")).expanduser()
+        viescore_root = (
+            viescore_root or Path(os.environ.get("VIESCORE_ROOT", "")).expanduser()
+        )
+        key_path = (
+            key_path or Path(os.environ.get("VIESCORE_KEY_PATH", "")).expanduser()
+        )
         if not str(viescore_root) or str(viescore_root) == ".":
-            raise EnvironmentError("Set VIESCORE_ROOT to the Step1X-Edit GEdit-Bench directory.")
+            raise EnvironmentError(
+                "Set VIESCORE_ROOT to the Step1X-Edit GEdit-Bench directory."
+            )
         if not str(key_path) or str(key_path) == ".":
-            raise EnvironmentError("Set VIESCORE_KEY_PATH to the local OpenAI API key file.")
+            raise EnvironmentError(
+                "Set VIESCORE_KEY_PATH to the local OpenAI API key file."
+            )
         scorer = _load_viescore(viescore_root, key_path)
 
     metric_path = output_dir / "metrics" / "modified_viescore.jsonl"
@@ -228,9 +240,7 @@ def evaluate_saved_refedit_bench_outputs(
         metric_path.parent.mkdir(parents=True, exist_ok=True)
         temporary_path = metric_path.with_suffix(".jsonl.tmp")
         temporary_path.write_text(
-            "".join(
-                json.dumps(row, ensure_ascii=False) + "\n" for row in metric_rows
-            ),
+            "".join(json.dumps(row, ensure_ascii=False) + "\n" for row in metric_rows),
             encoding="utf-8",
         )
         temporary_path.replace(metric_path)

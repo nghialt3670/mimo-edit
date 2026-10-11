@@ -1,44 +1,81 @@
 from __future__ import annotations
 
-from typing import Any
-
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
-from framework.utils.image import composite_masked
+from ..context import ToolContext
 from ..registry import register_tool
+from ..utils import (
+    composite_masked,
+    validate_image,
+    validate_mask,
+    validate_number,
+    validate_number_range,
+    validate_text,
+)
+
+
+def _validate_apply_filter_args(
+    image: Image.Image,
+    filter_name: str,
+    value: float,
+    mask: Image.Image | None,
+) -> float:
+    validate_image("image", image)
+    if mask is not None:
+        validate_mask(image, mask)
+    validate_text("filter_name", filter_name)
+    _validate_filter_name(filter_name)
+    value = validate_number("value", value)
+    validate_number_range("value", value, -1, 1)
+    return value
+
+
+def _validate_filter_name(filter_name: str) -> None:
+    if filter_name not in {
+        "brightness",
+        "contrast",
+        "saturation",
+        "blackWhite",
+        "invert",
+        "blur",
+    }:
+        raise ValueError(f"unsupported filter: {filter_name}")
 
 
 @register_tool(
     "apply_filter",
-    "Apply a Pillow filter to the whole image or one masked object. With a mask, the filter is softly blended at the selected object's edge.",
+    "Apply a filter to the image or blend it into a masked area.",
     {
-        "image": {"type": "image", "description": "Source image."},
-        "filter_name": {"type": "string", "description": "Filter name."},
-        "value": {"type": "number", "description": "Strength from -1 to 1; use 0 for defaults."},
+        "image": {"type": "image", "description": "Image to edit."},
+        "filter_name": {
+            "type": "string",
+            "description": "Filter: brightness, contrast, saturation, blackWhite, invert, or blur.",
+        },
+        "value": {"type": "number", "description": "Filter strength from -1 to 1."},
         "mask": {
             "type": "image",
-            "description": "Optional mask selecting one object. Omit or pass null to filter the whole image.",
+            "description": "Optional mask for the area to filter; omit to filter the whole image.",
             "nullable": True,
         },
     },
     "image",
 )
 def apply_filter(
-    _models: Any,
+    ctx: ToolContext,
     image: Image.Image,
     filter_name: str,
     value: float,
     mask: Image.Image | None = None,
 ) -> Image.Image:
-    value = float(value)
-    if not -1 <= value <= 1:
-        raise ValueError("value must be between -1 and 1")
+    value = _validate_apply_filter_args(image, filter_name, value, mask)
     if filter_name == "blackWhite":
         filtered = ImageOps.grayscale(image).convert("RGB")
     elif filter_name == "invert":
         filtered = ImageOps.invert(image.convert("RGB"))
     elif filter_name == "blur":
-        filtered = image.filter(ImageFilter.GaussianBlur(radius=max(0, (value + 1) * 5)))
+        filtered = image.filter(
+            ImageFilter.GaussianBlur(radius=max(0, (value + 1) * 5))
+        )
     else:
         enhancers = {
             "brightness": ImageEnhance.Brightness,

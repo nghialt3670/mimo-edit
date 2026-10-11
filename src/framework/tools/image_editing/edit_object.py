@@ -1,46 +1,71 @@
 from __future__ import annotations
 
+from typing import Literal
+
 from PIL import Image
 
-from framework.inference import ModelCache, edit_masked_object
-from framework.inference.editing import EditMode
+from framework.inference import flux2_klein_edit_object
+
+from ..context import ToolContext
 from ..registry import register_tool
+from ..utils import (
+    validate_image,
+    validate_mask,
+    validate_number,
+    validate_number_range,
+    validate_text,
+)
+
+
+def _validate_edit_object_args(
+    image: Image.Image,
+    mask: Image.Image,
+    prompt: str,
+    mode: str,
+    padding: float | None,
+) -> None:
+    validate_image("image", image)
+    validate_mask(image, mask, same_size=True)
+    validate_text("prompt", prompt)
+    if mode not in ("local", "regional", "global"):
+        raise ValueError("mode must be 'local', 'regional', or 'global'")
+    if padding is not None:
+        validate_number_range("padding", validate_number("padding", padding), 0, 1)
 
 
 @register_tool(
     "edit_object",
-    "Edit one masked object. Write prompt as a complete, actionable visual transformation, not just a label or category (for example, do not use only 'a woman'). State what to change and include the requested attributes; preserve unmentioned details and the surrounding scene unless the user asks to change them. Example: for 'Let the man with longer curly hair, wearing a loose tie be a woman,' use 'Transform the selected man into a woman, keeping his longer curly hair, loose tie, pose, and surrounding scene unchanged.' Choose mode='local' for appearance changes that keep the object's shape; 'regional' for identity/shape changes or additions within nearby padding; or 'global' only when the requested edit needs scene-wide changes. Padding is a 0-1 fraction of the object's bounding-box width and height on each side; regional defaults to 0.25.",
+    "Edit the selected object. Describe the desired change and choose how much of the surrounding image may change.",
     {
-        "image": {"type": "image", "description": "Source image."},
-        "mask": {"type": "image", "description": "One Pillow mask; white pixels select the object."},
+        "image": {"type": "image", "description": "Image to edit."},
+        "mask": {"type": "image", "description": "Mask selecting the object to edit."},
         "prompt": {
             "type": "string",
-            "description": "A complete, actionable visual transformation: say what the selected object should look like after editing, include the user's requested attributes, and preserve unmentioned details. Do not pass only a subject/category label such as 'a woman'. Example: 'Transform the selected man into a woman, keeping his longer curly hair, loose tie, and pose.'",
+            "description": "Describe the intended change and preserve details the user did not ask to change.",
         },
         "mode": {
             "type": "string",
-            "description": "Required: 'local' preserves the selected object's silhouette; 'regional' permits changes/additions into a padded area around it; 'global' edits using the whole image and can change other scene areas.",
+            "description": "'local' keeps the object's shape; 'regional' allows nearby changes; 'global' allows changes across the image.",
         },
         "padding": {
             "type": "number",
-            "description": "Optional regional-mode padding from 0 to 1, as a fraction of the object's bounding-box dimensions per side. Default 0.25. Larger values allow larger nearby additions but can affect more surroundings.",
+            "description": "Optional regional padding from 0 to 1. Defaults to 0.25.",
             "nullable": True,
         },
     },
     "image",
 )
 def edit_object(
-    models: ModelCache,
+    ctx: ToolContext,
     image: Image.Image,
     mask: Image.Image,
     prompt: str,
-    mode: EditMode,
+    mode: Literal["local", "regional", "global"],
     padding: float | None = None,
 ) -> Image.Image:
-    if not isinstance(image, Image.Image):
-        raise TypeError("image must be a Pillow image")
-    return edit_masked_object(
-        models,
+    _validate_edit_object_args(image, mask, prompt, mode, padding)
+    return flux2_klein_edit_object(
+        ctx.model_pool,
         image,
         mask,
         prompt,

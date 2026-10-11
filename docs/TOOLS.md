@@ -5,13 +5,13 @@ This document describes the tools registered by
 [`image_editing_tools`](../src/framework/tools/__init__.py). The registry currently exposes
 11 tools:
 
-| Tool | Purpose | Default backbone |
+| Tool | Purpose | Backbone |
 | --- | --- | --- |
 | [`segment_object`](../src/framework/tools/image_editing/segment_object.py) | Find one object and return its mask | SAM 3 |
-| [`edit_object`](../src/framework/tools/image_editing/edit_object.py) | Semantically edit one masked object | FLUX.2 Klein 4B |
+| [`edit_object`](../src/framework/tools/image_editing/edit_object.py) | Semantically edit one masked object | FLUX.2 Klein base 4B |
 | [`remove_object`](../src/framework/tools/image_editing/remove_object.py) | Remove one masked object | ObjectClear |
 | [`replace_object`](../src/framework/tools/image_editing/replace_object.py) | Remove an object, then paste a replacement image | ObjectClear + Pillow |
-| [`generate_object`](../src/framework/tools/image_editing/generate_object.py) | Generate or transform content in a selected region | FLUX.2 Klein 4B |
+| [`add_object`](../src/framework/tools/image_editing/add_object.py) | Inpaint an object into a selected region | FLUX.2 Klein base 4B |
 | [`move_object`](../src/framework/tools/image_editing/move_object.py) | Move one object to a point or box | ObjectClear + Pillow |
 | [`shift_object`](../src/framework/tools/image_editing/shift_object.py) | Translate one object by an offset | ObjectClear + Pillow |
 | [`rotate_object`](../src/framework/tools/image_editing/rotate_object.py) | Rotate one object | ObjectClear + Pillow |
@@ -19,8 +19,9 @@ This document describes the tools registered by
 | [`flip_object`](../src/framework/tools/image_editing/flip_object.py) | Flip one object horizontally or vertically | ObjectClear + Pillow |
 | [`apply_filter`](../src/framework/tools/image_editing/apply_filter.py) | Apply a visual filter globally or to one object | Pillow; no learned model |
 
-The entries in the table are the default backbones. Model IDs can be overridden
-as described in [Model configuration](#model-configuration).
+Each backbone's checkpoint ID and loading logic live in its inference module;
+inference settings are documented in
+[Inference configuration and runtime](#inference-configuration-and-runtime).
 
 ## Shared interface conventions
 
@@ -36,11 +37,9 @@ as described in [Model configuration](#model-configuration).
   as the next call's input.
 - `segment_object` creates masks. Other object-targeting tools consume a mask;
   they do not automatically identify the object from a text description.
-- Model-backed tools load pipelines lazily. The cache is shared by the tool set
-  created in one `image_editing_tools()` call, avoiding repeated pipeline loads
-  across calls. To download and load the default checkpoints before inference,
-  run the [model warmup notebook](../src/notebooks/model_warmup.ipynb); it loads
-  each model sequentially and releases it before moving on.
+- Model-backed tools use one eagerly initialized `ModelPool`. Constructing it
+  loads Klein, SAM 3, and ObjectClear together, so confirm that the host has
+  enough memory before creating the tool set. Reuse the pool across calls.
 
 ## Tool interfaces and behavior
 
@@ -106,13 +105,11 @@ The image-edit backend receives a crop and the composed editing instruction:
   bounds described in the prompt. It returns the full edited image without
   mask-based compositing, so unrelated areas can change.
 
-**Backbone:** `black-forest-labs/FLUX.2-klein-4B` by default, loaded through
-Diffusers' `Flux2KleinPipeline`. The optional
-`black-forest-labs/FLUX.2-klein-9b-kv` backend uses `Flux2KleinKVPipeline`.
-Both adapters use four inference steps and seed `42` (guidance scale `1.0` for
-the 4B model; the 9B-KV pipeline uses its pipeline default). The 9B-KV model
-needs about 29 GB VRAM and has a non-commercial license. Neither backend falls
-back to Stable Diffusion.
+**Backbone:** `black-forest-labs/FLUX.2-klein-base-4B`, loaded through
+Diffusers' `Flux2KleinPipeline`. Editing uses 50 inference steps, guidance
+scale `4.0`, and seed `42` by default. The base checkpoint is slower than the
+distilled model, but is better suited to prompt-guided inpainting. Both editing
+and generation use this same backend; there is no alternate model backend.
 
 ### `remove_object`
 
@@ -124,9 +121,9 @@ sampling; the image and mask are resized for the model and the result is
 resized back to the original image dimensions.
 
 **Backbone:** `jixin0101/ObjectClear` by default. It uses eight inference steps,
-guidance scale `2.0`, and seed `42`. ObjectClear is distributed under its
-upstream S-Lab license, which restricts use to non-commercial purposes; review
-the included license before use.
+guidance scale `2.0`, seed `42`, and a minimum working image side of 384 pixels
+by default. ObjectClear is distributed under its upstream S-Lab license, which
+restricts use to non-commercial purposes; review the included license before use.
 
 ### `replace_object`
 
@@ -147,7 +144,7 @@ raises an error.
 **Backbone:** ObjectClear (`jixin0101/ObjectClear`) for removal; resizing and
 pasting use Pillow.
 
-### `generate_object`
+### `add_object`
 
 **Inputs**
 
@@ -156,18 +153,16 @@ pasting use Pillow.
 | `image` | Image | Yes | Source image. |
 | `prompt` | String | Yes | Description of the requested content or transformation. |
 | `mask` | Image or null | No | White pixels select the region to edit. |
-| `box` | Array or null | No | Pixel region `[x1, y1, x2, y2]` to edit. |
+| `box` | Array or null | No | In-image pixel region `[x1, y1, x2, y2]` to edit; the lower-right edge is exclusive. |
 | `phrase` | String or null | No | Object description for phrase-guided placement within `box`. |
 
 There are two mutually exclusive routes:
 
-1. **Region edit/generation:** supply exactly one of `mask` or `box`, and omit
-   `phrase`. A box is converted to a rectangular mask. FLUX.2 Klein edits a
-   crop around the selected region using the prompt, then composites the edit
-   into the source.
+1. **Region inpainting:** supply exactly one of `mask` or `box`, and omit
+   `phrase`. A box must lie entirely inside the image and is converted to an
+   exact rectangular mask. The prompt describes the object to insert.
 2. **Phrase-guided placement:** supply `box` and `phrase`, and omit `mask`.
-   The phrase is included in the prompt and FLUX.2 Klein edits the destination
-   region using the same regional-edit path.
+   The phrase is appended to the prompt and the box is converted to a mask.
 
 The general `prompt` must be non-empty. A `phrase` without a box, a mask paired
 with a phrase, both mask and box without a phrase, or neither mask nor box
@@ -175,10 +170,16 @@ raises an error.
 
 **Backbone**
 
-`generate_object` uses the same FLUX.2 Klein backend as `edit_object`, with
-four image-conditioned denoising steps. The selected mask or box uses regional
-mode with zero padding, so the edit area is not expanded beyond the supplied
-selection; content outside its feathered composite boundary is preserved.
+`add_object` calls the FLUX.2 Klein 4B inpainting pipeline directly with the
+selected mask and prompt. If a box is supplied, the tool converts it to a
+rectangular mask with a softly feathered inner edge (up to 6 pixels) to reduce
+hard seams while preserving pixels outside the box. The pool's
+`KleinInferenceConfig` supplies the default
+inpainting strength, step count, guidance scale, and seed. The pipeline crops
+around the selected region with 64 pixels of context by default, improving
+focus on small destination boxes, then overlays the edited crop into the
+original image. Configure `inpaint_padding_mask_crop` to change the context
+padding.
 
 ### `move_object`
 
@@ -268,47 +269,49 @@ Unsupported filter names and values outside `[-1, 1]` raise an error.
 
 **Backbone:** None. Processing uses Pillow filters and compositing only.
 
-## Model configuration and runtime
+## Inference configuration and runtime
 
-Pass a `ModelConfig` when building the tools to override default model IDs:
+The framework uses fixed backbones: FLUX.2 Klein base 4B for editing and generation,
+SAM 3 for segmentation, and ObjectClear for removal. `InferenceConfig` contains
+their inference settings rather than model IDs:
 
 ```python
-from framework import ModelConfig, image_editing_tools
+from framework import (
+    InferenceConfig,
+    KleinInferenceConfig,
+    ObjectClearInferenceConfig,
+    image_editing_tools,
+)
 
 tools = image_editing_tools(
-    model_config=ModelConfig(
-        model_ids={
-            "edit_object": "black-forest-labs/FLUX.2-klein-9b-kv",
-            "segment_object": "facebook/sam3",
-            "remove_object": "jixin0101/ObjectClear",
-        },
-        backends={
-            "edit_object": "flux2-klein-9b-kv",
-        },
+    inference_config=InferenceConfig(
+        klein=KleinInferenceConfig(num_inference_steps=6),
+        object_clear=ObjectClearInferenceConfig(guidance_scale=2.5),
     )
 )
 ```
 
-Other supported model-ID override keys are `flip_object`, `move_object`,
-`replace_object`, `rotate_object`, `scale_object`, and `shift_object`; each
-defaults to the ObjectClear checkpoint. `apply_filter` has no model override
-because it does not load a model. `generate_object` shares the `edit_object`
-model ID and backend; configure Klein once under `edit_object`.
+`KleinInferenceConfig` controls `num_inference_steps`, `guidance_scale`,
+`inpaint_strength`, `inpaint_padding_mask_crop`, and the default edit seed.
+`Sam3InferenceConfig` controls `mask_threshold`. `ObjectClearInferenceConfig`
+controls `num_inference_steps`,
+`guidance_scale`, `seed`, and `working_min_side`. Editing and generation share
+Klein; object transforms share ObjectClear; visual and text segmentation share
+SAM 3. Defaults preserve the existing inference settings.
 
 At runtime, the model device is selected in this order: Apple MPS when
-available, otherwise CUDA, otherwise CPU. Pipelines are lazy-loaded and cached
-by pipeline and model ID in a `ModelCache`; tools constructed together by
-`image_editing_tools()` share the same cache. For explicit cache lifecycle or
-reuse, pass a `ModelCache` as the first argument:
+available, otherwise CUDA, otherwise CPU. `ModelPool` eagerly loads Klein,
+SAM 3, and ObjectClear during construction; tools constructed together by
+`image_editing_tools()` share the same pool. For explicit pool reuse, pass it
+as the first argument:
 
 ```python
-from framework import ModelCache, ModelConfig, image_editing_tools
+from framework import InferenceConfig, ModelPool, image_editing_tools
 
-cache = ModelCache(ModelConfig(model_ids={"segment_object": "facebook/sam3"}))
-tools = image_editing_tools(model_cache=cache)
-# Reuse these tools/cache for related calls, then release cached pipelines:
-cache.close()
+pool = ModelPool(InferenceConfig())
+tools = image_editing_tools(pool)
+# Reuse this pool and these tools for related calls.
 ```
 
-`model_cache` and `model_config` are mutually exclusive arguments to
+`pool` and `inference_config` are mutually exclusive arguments to
 `image_editing_tools()`.

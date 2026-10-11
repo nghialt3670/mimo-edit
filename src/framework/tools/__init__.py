@@ -2,28 +2,40 @@ from __future__ import annotations
 
 from smolagents import Tool
 
-from framework.inference import ModelCache, ModelConfig
+from framework.inference import (
+    InferenceConfig,
+    KleinInferenceConfig,
+    ModelPool,
+    ObjectClearInferenceConfig,
+    Sam3InferenceConfig,
+)
+
 from . import image_editing as image_editing
+from .context import ToolContext
 from .registry import ToolRegistry, build_tools, register_tool, registry
 
 
 def image_editing_tools(
-    model_cache: ModelCache | None = None,
+    pool: ModelPool | None = None,
     *,
-    model_config: ModelConfig | None = None,
+    inference_config: InferenceConfig | None = None,
 ) -> list[Tool]:
-    """Build tools sharing a lazy model cache with optional model overrides."""
-    if model_cache is not None and model_config is not None:
-        raise ValueError("pass either model_cache or model_config, not both")
-    cache = model_cache if model_cache is not None else ModelCache(model_config)
-    return build_tools(cache)
+    """Build tools sharing one eagerly initialized inference model pool."""
+    if pool is not None and inference_config is not None:
+        raise ValueError("pass either pool or inference_config, not both")
+    model_pool = pool if pool is not None else ModelPool(inference_config)
+    return build_tools(ToolContext(model_pool=model_pool))
 
 
 __all__ = [
     "Tool",
     "ToolRegistry",
-    "ModelCache",
-    "ModelConfig",
+    "ToolContext",
+    "ModelPool",
+    "InferenceConfig",
+    "KleinInferenceConfig",
+    "ObjectClearInferenceConfig",
+    "Sam3InferenceConfig",
     "build_tools",
     "image_editing_tools",
     "register_tool",

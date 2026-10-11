@@ -20,9 +20,13 @@ def _read_records(path: Path) -> list[dict[str, Any]]:
             try:
                 record = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSONL in {path} at line {line_number}") from exc
+                raise ValueError(
+                    f"Invalid JSONL in {path} at line {line_number}"
+                ) from exc
             metadata = record.get("metadata")
-            row_index = metadata.get("row_index") if isinstance(metadata, dict) else None
+            row_index = (
+                metadata.get("row_index") if isinstance(metadata, dict) else None
+            )
             if not isinstance(row_index, int) or isinstance(row_index, bool):
                 raise ValueError(
                     f"Missing or invalid metadata.row_index in {path} at line {line_number}"
@@ -40,7 +44,9 @@ def _read_successful_ids(path: Path) -> set[str]:
             try:
                 record = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSONL in {path} at line {line_number}") from exc
+                raise ValueError(
+                    f"Invalid JSONL in {path} at line {line_number}"
+                ) from exc
             sample_id = record.get("sample_id")
             if sample_id is not None:
                 successful_ids.add(str(sample_id))
@@ -94,7 +100,9 @@ def sync_annotations(
             try:
                 record = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise ValueError(f"Invalid JSONL in {audit_path} at line {line_number}") from exc
+                raise ValueError(
+                    f"Invalid JSONL in {audit_path} at line {line_number}"
+                ) from exc
             sample_id = record.get("sample_id")
             if sample_id is not None and str(sample_id) in successful_ids:
                 removed_audit_count += 1

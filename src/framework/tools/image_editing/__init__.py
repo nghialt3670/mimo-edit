@@ -1,13 +1,15 @@
 """Individually registered image-editing tools."""
 
-from . import apply_filter
-from . import edit_object
-from . import flip_object
-from . import generate_object
-from . import move_object
-from . import remove_object
-from . import replace_object
-from . import rotate_object
-from . import scale_object
-from . import segment_object
-from . import shift_object
+from . import (
+    add_object,
+    apply_filter,
+    edit_object,
+    flip_object,
+    move_object,
+    remove_object,
+    replace_object,
+    rotate_object,
+    scale_object,
+    segment_object,
+    shift_object,
+)

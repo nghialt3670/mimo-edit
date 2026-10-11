@@ -17,3 +17,6 @@ wheels/
 
 # VieScore key
 .viescore.key
+
+# Debug notebooks
+/src/notebooks/debug/

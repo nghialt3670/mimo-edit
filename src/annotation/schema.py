@@ -11,9 +11,13 @@ Role = Literal["target", "anchor", "source", "context"]
 
 class ParsedEntity(BaseModel):
     span: str = Field(description="Exact verbatim span copied from the instruction.")
-    occurrence: int = Field(default=0, ge=0, description="0-based occurrence among exact span matches.")
+    occurrence: int = Field(
+        default=0, ge=0, description="0-based occurrence among exact span matches."
+    )
     role: Role
-    grounding_query: str = Field(description="Short phrase describing the visible source-image entity.")
+    grounding_query: str = Field(
+        description="Short phrase describing the visible source-image entity."
+    )
     present_in_source: bool = True
 
 

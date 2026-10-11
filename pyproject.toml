@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mmedit-framework"
+name = "mmedit"
 version = "0.1.0"
 description = "A multi-turn image-editing agent with bundled model inference"
 readme = "README.md"
@@ -11,7 +11,7 @@ requires-python = ">=3.13"
 dependencies = [
     "accelerate>=1.15.0",
     "datasets>=5.0.1",
-    "diffusers>=0.41.0.dev0",
+    "diffusers>=0.38.0",
     "google-genai>=2.26.0",
     "ipykernel>=7.4.0",
     "matplotlib>=3.11.2",
@@ -27,6 +27,12 @@ dependencies = [
     "torchvision>=0.29.1",
     "transformers>=5.19.0.dev0",
     "tqdm>=4.70.1",
+    "bitsandbytes>=0.50.2",
+    "sentencepiece>=0.2.2",
+    "huggingface-hub>=1.33.0",
+    "protobuf>=7.36.2",
+    "torchaudio>=2.11.0",
+    "safetensors>=0.8.0",
 ]
 
 [project.optional-dependencies]
@@ -51,9 +57,26 @@ visualize = [
     "scikit-image>=0.25.2",
 ]
 
+[dependency-groups]
+dev = [
+    "black>=25.1.0",
+    "isort>=6.0.1",
+]
+
+[tool.black]
+line-length = 88
+target-version = ["py313"]
+
+[tool.isort]
+profile = "black"
+line_length = 88
+
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["annotation*", "evaluation*", "framework*", "scripts*", "visualization*"]
 
 [tool.setuptools.package-data]
 "framework.inference" = ["objectclear/LICENSE"]
+
+[tool.uv.sources]
+diffusers = { git = "https://github.com/huggingface/diffusers.git" }

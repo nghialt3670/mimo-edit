@@ -11,7 +11,6 @@ from .executor import TerminalExecutor, local_executor
 from .schema import Message, TurnResult
 from .trajectory import clean_trajectory, format_trajectory
 
-
 _SYSTEM_PROMPT = r"""
 You are a code-action agent operating in a repeated Observation -> Thought -> Act loop.
 
@@ -111,8 +110,14 @@ class _ObservationFormatter:
             step.observations = None
             return
 
-        state = getattr(getattr(agent, "python_executor", None), "state", {}) if agent else {}
-        names = sorted(name for name in state if not name.startswith("_") and name != "__name__")
+        state = (
+            getattr(getattr(agent, "python_executor", None), "state", {})
+            if agent
+            else {}
+        )
+        names = sorted(
+            name for name in state if not name.startswith("_") and name != "__name__"
+        )
         payload: dict[str, Any] = {
             "type": "execution_error" if step.error is not None else "execution_result",
             "text": step.observations or "",
@@ -154,14 +159,18 @@ class Agent:
         self._last_raw: Any | None = None
 
     @staticmethod
-    def _join_instructions(instructions: str | None, examples: str | None) -> str | None:
+    def _join_instructions(
+        instructions: str | None, examples: str | None
+    ) -> str | None:
         chunks = [x.strip() for x in (instructions, examples) if x and x.strip()]
         return "\n\n".join(chunks) or None
 
     def _build_agent(self) -> _ObservationCodeAgent:
         base_executor = self.executor or local_executor()
         terminal_executor = (
-            base_executor if isinstance(base_executor, TerminalExecutor) else TerminalExecutor(base_executor)
+            base_executor
+            if isinstance(base_executor, TerminalExecutor)
+            else TerminalExecutor(base_executor)
         )
         # Important: do not assign agent.system_prompt. In smolagents >=1.26 it is read-only.
         # final_answer remains internally registered so the executor can use it, but our Jinja
@@ -199,7 +208,9 @@ class Agent:
 
         output = raw.output
         if isinstance(output, dict) and "text" in output:
-            message = Message(text=str(output["text"]), objects=list(output.get("objects") or []))
+            message = Message(
+                text=str(output["text"]), objects=list(output.get("objects") or [])
+            )
         else:
             message = Message(text=str(output), objects=[])
         return TurnResult(message=message, raw=raw)

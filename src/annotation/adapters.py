@@ -18,7 +18,9 @@ def _refedit_bench_mask(value: Any, size: tuple[int, int]) -> Image.Image:
     if isinstance(value, Image.Image):
         return value.convert("L")
     if not isinstance(value, str):
-        raise TypeError(f"RefEdit-Bench mask must be a polygon string, got {type(value).__name__}")
+        raise TypeError(
+            f"RefEdit-Bench mask must be a polygon string, got {type(value).__name__}"
+        )
 
     polygons = json.loads(value)
     if not isinstance(polygons, list):
@@ -28,7 +30,9 @@ def _refedit_bench_mask(value: Any, size: tuple[int, int]) -> Image.Image:
     draw = ImageDraw.Draw(mask)
     for polygon in polygons:
         if not isinstance(polygon, list) or len(polygon) < 6 or len(polygon) % 2:
-            raise ValueError("RefEdit-Bench polygon must contain at least three x/y coordinate pairs")
+            raise ValueError(
+                "RefEdit-Bench polygon must contain at least three x/y coordinate pairs"
+            )
         points = list(zip(polygon[::2], polygon[1::2], strict=True))
         draw.polygon(points, fill=255)
     return mask
@@ -36,7 +40,13 @@ def _refedit_bench_mask(value: Any, size: tuple[int, int]) -> Image.Image:
 
 def refedit_bench(row: dict[str, Any], split: str, index: int) -> Sample:
     """Official bpathir1/RefEdit-Bench schema (HF test split)."""
-    required = {"input_image", "editing_instruction", "edit_instruction_single", "mask", "category"}
+    required = {
+        "input_image",
+        "editing_instruction",
+        "edit_instruction_single",
+        "mask",
+        "category",
+    }
     _require(row, required, "RefEdit-Bench")
     category = str(row["category"])
     raw_index = int(row.get("_row_index", index))
@@ -62,7 +72,14 @@ def refedit_bench(row: dict[str, Any], split: str, index: int) -> Sample:
 
 def magicbrush(row: dict[str, Any], split: str, index: int) -> Sample:
     """Official osunlp/MagicBrush HF train/dev schema."""
-    required = {"img_id", "turn_index", "source_img", "mask_img", "instruction", "target_img"}
+    required = {
+        "img_id",
+        "turn_index",
+        "source_img",
+        "mask_img",
+        "instruction",
+        "target_img",
+    }
     _require(row, required, "MagicBrush")
     img_id, turn = str(row["img_id"]), int(row["turn_index"])
     raw_index = int(row.get("_row_index", index))
@@ -87,7 +104,15 @@ def magicbrush(row: dict[str, Any], split: str, index: int) -> Sample:
 
 def compbench(row: dict[str, Any], split: str, index: int) -> Sample:
     """Official BohanJia/CompBench schema for both train and multi_turn splits."""
-    required = {"task", "image_path", "input_image", "edited_image", "instruction", "caption", "mask"}
+    required = {
+        "task",
+        "image_path",
+        "input_image",
+        "edited_image",
+        "instruction",
+        "caption",
+        "mask",
+    }
     _require(row, required, "CompBench")
     task, image_path = str(row["task"]), str(row["image_path"])
     raw_index = int(row.get("_row_index", index))

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from difflib import SequenceMatcher
 import re
 from dataclasses import dataclass
+from difflib import SequenceMatcher
 
 from PIL import Image, ImageChops
 
@@ -37,11 +37,23 @@ def _recover_span(text: str, span: str) -> tuple[int, int] | None:
     minimum_length = max(1, len(query_words) - 2)
     maximum_length = len(query_words) + 2
     for start_index in range(len(source_words)):
-        for length in range(minimum_length, min(maximum_length, len(source_words) - start_index) + 1):
+        for length in range(
+            minimum_length, min(maximum_length, len(source_words) - start_index) + 1
+        ):
             end_index = start_index + length
-            candidate_words = [word.group().casefold() for word in source_words[start_index:end_index]]
-            similarity = SequenceMatcher(None, query_words, candidate_words, autojunk=False).ratio()
-            candidates.append((similarity, source_words[start_index].start(), source_words[end_index - 1].end()))
+            candidate_words = [
+                word.group().casefold() for word in source_words[start_index:end_index]
+            ]
+            similarity = SequenceMatcher(
+                None, query_words, candidate_words, autojunk=False
+            ).ratio()
+            candidates.append(
+                (
+                    similarity,
+                    source_words[start_index].start(),
+                    source_words[end_index - 1].end(),
+                )
+            )
 
     candidates.sort(reverse=True)
     if not candidates or candidates[0][0] < 0.9:
@@ -51,7 +63,9 @@ def _recover_span(text: str, span: str) -> tuple[int, int] | None:
     return candidates[0][1], candidates[0][2]
 
 
-def locate_spans(text: str, entities: list[ParsedEntity]) -> list[tuple[int, int, ParsedEntity]]:
+def locate_spans(
+    text: str, entities: list[ParsedEntity]
+) -> list[tuple[int, int, ParsedEntity]]:
     located: list[tuple[int, int, ParsedEntity]] = []
     for entity in entities:
         if not entity.span:
@@ -63,7 +77,9 @@ def locate_spans(text: str, entities: list[ParsedEntity]) -> list[tuple[int, int
             continue
         matches = list(re.finditer(re.escape(entity.span), text))
         if entity.occurrence >= len(matches):
-            recovered = _recover_span(text, entity.span) if entity.occurrence == 0 else None
+            recovered = (
+                _recover_span(text, entity.span) if entity.occurrence == 0 else None
+            )
             if recovered is not None:
                 start, end = recovered
                 corrected_entity = entity.model_copy(update={"span": text[start:end]})
@@ -77,7 +93,9 @@ def locate_spans(text: str, entities: list[ParsedEntity]) -> list[tuple[int, int
     located.sort(key=lambda x: (x[0], x[1]))
     for left, right in zip(located, located[1:]):
         if left[1] > right[0]:
-            raise AnnotationError(f"overlapping_spans:{left[2].span!r}|{right[2].span!r}")
+            raise AnnotationError(
+                f"overlapping_spans:{left[2].span!r}|{right[2].span!r}"
+            )
     return located
 
 
@@ -263,7 +281,9 @@ class Annotator:
             if sample.mask is None or sample.mask.getbbox() is None:
                 raise AnnotationError("multi_object_add_mask_missing_or_empty")
             caption = str(sample.metadata.get("caption", ""))
-            expected_count = len([part for part in caption.split("|") if part.strip()]) or 2
+            expected_count = (
+                len([part for part in caption.split("|") if part.strip()]) or 2
+            )
             components = mask_components(sample.mask, expected_count=expected_count)
 
             entities_by_span: dict[tuple[int, int], ParsedEntity] = {}
@@ -314,7 +334,13 @@ class Annotator:
                     combined_mask = ImageChops.lighter(combined_mask, missing_mask)
                 insertion = locate_spans(
                     parser_instruction,
-                    [ParsedEntity(span="", role="target", grounding_query="combined masked addition destination")],
+                    [
+                        ParsedEntity(
+                            span="",
+                            role="target",
+                            grounding_query="combined masked addition destination",
+                        )
+                    ],
                 )[0][0]
                 bbox = mask_bbox(combined_mask, sample.image.size)
                 if bbox is None:
@@ -343,7 +369,9 @@ class Annotator:
             if sample.mask is None or sample.mask.getbbox() is None:
                 raise AnnotationError("multi_object_remove_mask_missing_or_empty")
             caption = str(sample.metadata.get("caption", ""))
-            expected_count = len([part for part in caption.split("|") if part.strip()]) or 2
+            expected_count = (
+                len([part for part in caption.split("|") if part.strip()]) or 2
+            )
             components = mask_components(sample.mask, expected_count=expected_count)
 
             mask_entries: list[tuple[ParsedEntity, Image.Image, Region]] = []
@@ -365,17 +393,19 @@ class Annotator:
                 bbox = mask_bbox(component_mask, sample.image.size)
                 if bbox is None:
                     raise AnnotationError("multi_object_remove_empty_mask_component")
-                mask_entries.append((
-                    entity,
-                    component_mask,
-                    Region(
-                        bbox_xyxy=bbox,
-                        image_size=sample.image.size,
-                        confidence=1.0,
-                        label=entity.grounding_query,
-                        source="benchmark_mask:edit_region_component",
-                    ),
-                ))
+                mask_entries.append(
+                    (
+                        entity,
+                        component_mask,
+                        Region(
+                            bbox_xyxy=bbox,
+                            image_size=sample.image.size,
+                            confidence=1.0,
+                            label=entity.grounding_query,
+                            source="benchmark_mask:edit_region_component",
+                        ),
+                    )
+                )
 
             entities_by_span: dict[tuple[int, int], ParsedEntity] = {}
             for entity, component_mask, region in _disambiguate_masked_spans(
@@ -389,7 +419,9 @@ class Annotator:
                     component_mask = ImageChops.lighter(previous[1], component_mask)
                     bbox = mask_bbox(component_mask, sample.image.size)
                     if bbox is None:
-                        raise AnnotationError("multi_object_remove_empty_mask_component")
+                        raise AnnotationError(
+                            "multi_object_remove_empty_mask_component"
+                        )
                     region = region.model_copy(update={"bbox_xyxy": bbox})
                 component_regions[key] = (region, component_mask)
                 entities_by_span.setdefault(key, entity)
@@ -492,7 +524,9 @@ class Annotator:
         if not entities:
             raise NoReferenceError("no_source_visible_reference")
         if masked_reference_only and len(entities) != 1:
-            raise AnnotationError(f"refedit_expected_one_mask_reference:got_{len(entities)}")
+            raise AnnotationError(
+                f"refedit_expected_one_mask_reference:got_{len(entities)}"
+            )
         sample.visible_reference_count = len(entities)
 
         located = locate_spans(parser_instruction, entities)
@@ -516,9 +550,13 @@ class Annotator:
                 region, component_mask = component_region
                 sample.reference_masks[f"e{i}"] = component_mask
             if region is None:
-                raise AnnotationError(f"grounding_failed:e{i}:{entity.grounding_query!r}")
+                raise AnnotationError(
+                    f"grounding_failed:e{i}:{entity.grounding_query!r}"
+                )
             if region.confidence < self.min_confidence:
-                raise AnnotationError(f"grounding_low_confidence:e{i}:{region.confidence:.3f}")
+                raise AnnotationError(
+                    f"grounding_low_confidence:e{i}:{region.confidence:.3f}"
+                )
             references.append(
                 Reference(
                     token=f"<v{i}>",
@@ -544,15 +582,19 @@ class Annotator:
             target_ref=sample.target_ref,
             metadata={
                 **sample.metadata,
-                **({
-                    "mask_guidance_used": mask_guidance_used,
-                    "mask_guidance_reasons": mask_guidance_reasons,
-                } if (
-                    masked_reference_only
-                    or mask_guided_spatial_reference
-                    or multi_object_add
-                    or multi_object_remove
-                ) else {}),
+                **(
+                    {
+                        "mask_guidance_used": mask_guidance_used,
+                        "mask_guidance_reasons": mask_guidance_reasons,
+                    }
+                    if (
+                        masked_reference_only
+                        or mask_guided_spatial_reference
+                        or multi_object_add
+                        or multi_object_remove
+                    )
+                    else {}
+                ),
             },
             linguistic_stats=linguistic_stats(sample.instruction, mixed),
         )

@@ -38,7 +38,9 @@ class AnnotationConfig:
         try:
             output_directory = default_directories[benchmark]
         except KeyError as exc:
-            raise ValueError(f"Unsupported annotation benchmark: {benchmark!r}") from exc
+            raise ValueError(
+                f"Unsupported annotation benchmark: {benchmark!r}"
+            ) from exc
         raw_limit = int(os.environ.get("ANNOTATE_LIMIT", "10"))
         if raw_limit < 0:
             raise ValueError("ANNOTATE_LIMIT must be zero or a positive integer.")

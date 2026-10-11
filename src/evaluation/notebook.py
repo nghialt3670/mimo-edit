@@ -43,7 +43,9 @@ def load_benchmark(
     except KeyError as exc:
         raise ValueError(f"Unsupported benchmark: {benchmark!r}") from exc
 
-    annotation_path = Path(os.environ.get(annotation_env) or default_annotation).expanduser()
+    annotation_path = Path(
+        os.environ.get(annotation_env) or default_annotation
+    ).expanduser()
     if not annotation_path.is_absolute():
         annotation_path = project_root / annotation_path
     annotation_file = annotation_path.resolve()
@@ -52,10 +54,14 @@ def load_benchmark(
             f"{benchmark} annotations not found: {annotation_file}. "
             f"Set {annotation_env}."
         )
-    output_dir = Path(
-        os.environ.get(output_env)
-        or str(project_root / ".out" / "evaluation" / benchmark)
-    ).expanduser().resolve()
+    output_dir = (
+        Path(
+            os.environ.get(output_env)
+            or str(project_root / ".out" / "evaluation" / benchmark)
+        )
+        .expanduser()
+        .resolve()
+    )
     records = list(read_jsonl(annotation_file))
     if not records:
         raise ValueError(f"No {benchmark} annotations found in {annotation_file}")
@@ -109,12 +115,18 @@ def resolve_run_directory(
         )
 
     if Path(run_name).name != run_name or not run_name.startswith("run_"):
-        raise ValueError("run_name must be 'latest' or a run_<timestamp> directory name.")
+        raise ValueError(
+            "run_name must be 'latest' or a run_<timestamp> directory name."
+        )
     run_dir = (output_root / run_name).resolve()
     if run_dir.parent != output_root:
-        raise ValueError(f"Run directory must be directly under {output_root}: {run_name!r}")
+        raise ValueError(
+            f"Run directory must be directly under {output_root}: {run_name!r}"
+        )
     if not (run_dir / "results" / "results.jsonl").is_file():
-        raise FileNotFoundError(f"Inference results not found in run directory: {run_dir}")
+        raise FileNotFoundError(
+            f"Inference results not found in run directory: {run_dir}"
+        )
     return run_dir
 
 

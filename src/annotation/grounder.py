@@ -9,13 +9,17 @@ from .schema import ParsedEntity, Region, Sample
 
 
 class Grounder(Protocol):
-    def ground(self, sample: Sample, entity: ParsedEntity, visible_target_count: int) -> Region | None: ...
+    def ground(
+        self, sample: Sample, entity: ParsedEntity, visible_target_count: int
+    ) -> Region | None: ...
 
 
 class MaskOnlyGrounder:
     """Reject any attempt to ground a reference without a dataset mask."""
 
-    def ground(self, sample: Sample, entity: ParsedEntity, visible_target_count: int) -> Region | None:
+    def ground(
+        self, sample: Sample, entity: ParsedEntity, visible_target_count: int
+    ) -> Region | None:
         _ = sample, visible_target_count
         raise RuntimeError(
             f"Mask-only annotation cannot ground {entity.grounding_query!r} without a dataset mask"
@@ -23,10 +27,16 @@ class MaskOnlyGrounder:
 
 
 def resize_mask(mask: Image.Image, size: tuple[int, int]) -> Image.Image:
-    return mask.convert("L").resize(size, Image.Resampling.NEAREST) if mask.size != size else mask.convert("L")
+    return (
+        mask.convert("L").resize(size, Image.Resampling.NEAREST)
+        if mask.size != size
+        else mask.convert("L")
+    )
 
 
-def mask_bbox(mask: Image.Image, size: tuple[int, int]) -> tuple[float, float, float, float] | None:
+def mask_bbox(
+    mask: Image.Image, size: tuple[int, int]
+) -> tuple[float, float, float, float] | None:
     arr = np.asarray(resize_mask(mask, size))
     ys, xs = np.where(arr > 0)
     if xs.size == 0:
@@ -51,17 +61,18 @@ def _projection_split(binary: np.ndarray) -> tuple[np.ndarray, np.ndarray] | Non
         cumulative = np.cumsum(projection)
         minimum_side = max(64, int(area * 0.12))
         valid = np.flatnonzero(
-            (cumulative >= minimum_side)
-            & (cumulative <= area - minimum_side)
+            (cumulative >= minimum_side) & (cumulative <= area - minimum_side)
         )
         neighborhood = max(12, len(projection) // 12)
 
         for cut in valid:
             if cut == 0 or cut + 1 == len(projection):
                 continue
-            left_peak = float(smoothed[max(0, cut - neighborhood):cut].max(initial=0))
+            left_peak = float(smoothed[max(0, cut - neighborhood) : cut].max(initial=0))
             right_peak = float(
-                smoothed[cut + 1:min(len(projection), cut + neighborhood + 1)].max(initial=0)
+                smoothed[cut + 1 : min(len(projection), cut + neighborhood + 1)].max(
+                    initial=0
+                )
             )
             reference_peak = min(left_peak, right_peak)
             if reference_peak <= 0:
@@ -79,11 +90,11 @@ def _projection_split(binary: np.ndarray) -> tuple[np.ndarray, np.ndarray] | Non
     first = binary.copy()
     second = binary.copy()
     if axis == 0:
-        first[cut + 1:, :] = False
-        second[:cut + 1, :] = False
+        first[cut + 1 :, :] = False
+        second[: cut + 1, :] = False
     else:
-        first[:, cut + 1:] = False
-        second[:, :cut + 1] = False
+        first[:, cut + 1 :] = False
+        second[:, : cut + 1] = False
     return first, second
 
 
@@ -164,24 +175,33 @@ class GroundingDinoGrounder:
         if self.device is None:
             if torch.cuda.is_available():
                 self.device = "cuda"
-            elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            elif (
+                getattr(torch.backends, "mps", None)
+                and torch.backends.mps.is_available()
+            ):
                 self.device = "mps"
             else:
                 self.device = "cpu"
         self.torch = torch
         self.processor = AutoProcessor.from_pretrained(self.model_id)
-        self.model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id).to(self.device)
+        self.model = AutoModelForZeroShotObjectDetection.from_pretrained(
+            self.model_id
+        ).to(self.device)
         self.model.eval()
         self._loaded = True
 
-    def ground(self, sample: Sample, entity: ParsedEntity, visible_target_count: int = 0) -> Region | None:
+    def ground(
+        self, sample: Sample, entity: ParsedEntity, visible_target_count: int = 0
+    ) -> Region | None:
         self._load()
         image = sample.image.convert("RGB")
         query = entity.grounding_query.strip()
         if not query:
             return None
         text_labels = [[query]]
-        inputs = self.processor(images=image, text=text_labels, return_tensors="pt").to(self.device)
+        inputs = self.processor(images=image, text=text_labels, return_tensors="pt").to(
+            self.device
+        )
         with self.torch.inference_mode():
             outputs = self.model(**inputs)
         result = self.processor.post_process_grounded_object_detection(
@@ -217,11 +237,15 @@ class GroundingDinoGrounder:
 class HybridGrounder:
     """Use a benchmark mask for one visible target; Grounding DINO otherwise."""
 
-    def __init__(self, fallback: Grounder | None = None, prefer_benchmark_mask: bool = True):
+    def __init__(
+        self, fallback: Grounder | None = None, prefer_benchmark_mask: bool = True
+    ):
         self.fallback = fallback or GroundingDinoGrounder()
         self.prefer_benchmark_mask = prefer_benchmark_mask
 
-    def ground(self, sample: Sample, entity: ParsedEntity, visible_target_count: int) -> Region | None:
+    def ground(
+        self, sample: Sample, entity: ParsedEntity, visible_target_count: int
+    ) -> Region | None:
         if sample.benchmark == "refedit_bench":
             if sample.visible_reference_count != 1 or sample.mask is None:
                 return None
