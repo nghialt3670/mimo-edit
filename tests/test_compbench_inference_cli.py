@@ -19,6 +19,7 @@ class CompBenchInferenceCliTests(unittest.TestCase):
         self.assertEqual(args.start_index, 0)
         self.assertFalse(args.resume)
         self.assertIsNone(args.run)
+        self.assertFalse(args.rerun_completed)
 
     def test_accepts_smoke_test_and_resume_options(self):
         with patch.object(
@@ -33,6 +34,7 @@ class CompBenchInferenceCliTests(unittest.TestCase):
                 "--resume",
                 "--run",
                 "run_20261012_012511_868075",
+                "--rerun-completed",
                 "--require-cuda",
             ],
         ):
@@ -42,6 +44,7 @@ class CompBenchInferenceCliTests(unittest.TestCase):
         self.assertEqual(args.start_index, 2)
         self.assertTrue(args.resume)
         self.assertEqual(args.run, "run_20261012_012511_868075")
+        self.assertTrue(args.rerun_completed)
         self.assertTrue(args.require_cuda)
 
     def test_rejects_run_without_resume(self):
@@ -49,6 +52,15 @@ class CompBenchInferenceCliTests(unittest.TestCase):
             sys,
             "argv",
             ["compbench_inference_mixed", "--run", "run_20261012_012511_868075"],
+        ):
+            with self.assertRaises(SystemExit):
+                _parse_args()
+
+    def test_rejects_rerun_completed_without_resume(self):
+        with patch.object(
+            sys,
+            "argv",
+            ["compbench_inference_mixed", "--rerun-completed"],
         ):
             with self.assertRaises(SystemExit):
                 _parse_args()

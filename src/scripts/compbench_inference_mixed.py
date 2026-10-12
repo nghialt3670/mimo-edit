@@ -50,6 +50,14 @@ def _parse_args() -> argparse.Namespace:
         help="Existing run_<timestamp> to resume; defaults to the latest run.",
     )
     parser.add_argument(
+        "--rerun-completed",
+        action="store_true",
+        help=(
+            "With --resume, rerun completed samples in the selected index range "
+            "instead of skipping them."
+        ),
+    )
+    parser.add_argument(
         "--require-cuda",
         action="store_true",
         help="Fail before model loading if PyTorch cannot access a CUDA GPU.",
@@ -62,6 +70,8 @@ def _parse_args() -> argparse.Namespace:
         parser.error("--start-index must be zero or greater.")
     if args.run and not args.resume:
         parser.error("--run can only be used with --resume.")
+    if args.rerun_completed and not args.resume:
+        parser.error("--rerun-completed can only be used with --resume.")
     if args.annotations and args.annotation_run:
         parser.error("--annotations and --annotation-run cannot be combined.")
     return args
@@ -154,6 +164,7 @@ def main() -> None:
         model=model,
         tools=tools,
         resume=args.resume,
+        rerun_completed=args.rerun_completed,
         display_fn=None,
     )
 
