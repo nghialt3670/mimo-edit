@@ -29,8 +29,8 @@ Rules:
 - Never rewrite the instruction.
 """
 
-MASKED_REFERENCE_PROMPT = """The input image has the dataset-provided mask overlaid in translucent magenta. Use the highlighted pixels to identify the visible source entity that should become the visual reference.
-Return exactly one entity: a verbatim, non-overlapping phrase from the instruction that identifies the masked entity. Set present_in_source=true and choose its role based on the instruction:
+MASKED_REFERENCE_PROMPT = """The input image has the dataset-provided mask overlaid in translucent magenta. Use the highlighted pixels to identify the visible source entity that should become the visual reference. For multi-object removal, each parse highlights one removed instance; identify that instance, not the whole group of removed instances.
+Return exactly one entity: a verbatim phrase from the instruction that identifies the masked entity. Set present_in_source=true and choose its role based on the instruction:
 - Use role="target" only when the masked entity itself is the entity being edited.
 - Use role="anchor" when the instruction edits a distinct object, part, or accessory associated with the masked entity. In that case, select only the phrase identifying the masked entity; do not include the edited object/part/accessory in the span. Keeping that target phrase outside the span preserves the requested edit in the resulting mixed instruction.
 - For replacement instructions (for example, "change X to Y", "replace X with Y", or "swap X with Y"), X is the existing source entity and Y is the requested replacement. Never select Y as the visual reference; it may not exist in the source image.
@@ -42,13 +42,15 @@ Examples:
 - "Change the color of the shirt of the man in a grey suit." with the MAN masked -> span "the man in a grey suit", role="anchor". Keep "the shirt" and the requested color outside the span.
 - "Turn off the light of the microwave that has another microwave on top of it." with the LOWER MICROWAVE masked -> span "the microwave that has another microwave on top of it", role="anchor". Keep "the light" outside the span.
 - "Change the surfboard to red." with the SURFBOARD masked -> span "the surfboard", role="target".
+When the instruction names multiple instances collectively (for example, "remove the two fish") and does not distinguish them in text, return the same exact collective span for the individually highlighted instance. The annotation pipeline will create one reference for each mask.
 Do not select a larger phrase that combines the masked entity with a distinct edited object or accessory. Do not emit other entities, including newly requested objects or replacement objects.
 The span must be copied verbatim from the instruction. Never rewrite the instruction.
 """
 
 MASKED_SPATIAL_REFERENCE_PROMPT = """For this CompBench add instruction, replace the usual entity-extraction rules with these mask-guided rules.
-The input image has the dataset-provided edit mask overlaid in translucent magenta. The mask marks the destination edit region; it does not imply that the new object is already in the source. For multi_object_add, the mask shown for this parse is one connected component of the row's mask and marks one of the requested placements.
+The input image has the dataset-provided edit mask overlaid in translucent magenta. The mask marks the destination edit region; it does not imply that the new object is already in the source. For multi_object_add, the mask shown for this parse is one separated partition of the row's edit mask and marks one requested placement. When the dataset mask joins two placements together, the annotation pipeline splits the union spatially and sends each partition separately.
 Return exactly one entity whose span is the verbatim spatial or relational phrase in the instruction that identifies this highlighted destination. Prefer a phrase that answers "where should the new object be added?", such as "the leftmost", "the upper left", or "below the red fish". Do not include a second destination, or select the newly requested object's noun phrase or its appearance/action attributes.
+When multiple requested objects share one location phrase, return that same phrase for each corresponding mask partition. Never extend a location span across "and" or "or" to include another requested object (for example, in "add a dog left of the black dog and a woman", do not include "and a woman" in the location span).
 Keep the span as a complete location expression. If the span includes its leading spatial preposition (for example, "in the middle of the birds" or "behind the tree"), the annotation pipeline will replace that complete expression with "at <v1>" so the destination reference remains connected to the sentence. Use role="target", present_in_source=true, and a concise grounding_query such as "masked addition destination"; the mask, not text-based detection, grounds this reference.
 The span must be copied verbatim from the instruction. Never rewrite the instruction.
 """

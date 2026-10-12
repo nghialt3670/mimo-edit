@@ -164,7 +164,8 @@ def load_sample(
     }
     references = []
     for ref in record.get("references", []):
-        prompts = ref.get("visual_prompts") or {}
+        region = ref.get("region") or {}
+        prompts = ref.get("visual_prompts") or region.get("visual_prompts") or {}
         scribble_info = prompts.get("scribble") or {}
         strokes = scribble_info.get("strokes") or []
         references.append(
@@ -172,7 +173,8 @@ def load_sample(
                 "token": ref.get("token"),
                 "role": ref.get("role"),
                 "span": ref.get("span"),
-                "bbox_xyxy": (prompts.get("box") or {}).get("xyxy"),
+                "bbox_xyxy": (prompts.get("box") or {}).get("xyxy")
+                or region.get("bbox_xyxy"),
                 "point_xy": (prompts.get("point") or {}).get("xy"),
                 "scribble_strokes": strokes,
                 "spatial_destination": spatial_destination,

@@ -4,6 +4,7 @@ from typing import Protocol
 
 import numpy as np
 from PIL import Image
+from scipy import ndimage
 
 from .schema import ParsedEntity, Region, Sample
 
@@ -83,7 +84,7 @@ def _projection_split(binary: np.ndarray) -> tuple[np.ndarray, np.ndarray] | Non
             if best is None or score < best[0]:
                 best = score, axis, int(cut)
 
-    if best is None or best[0] > 0.85:
+    if best is None:
         return None
 
     _, axis, cut = best
@@ -96,6 +97,119 @@ def _projection_split(binary: np.ndarray) -> tuple[np.ndarray, np.ndarray] | Non
         first[:, cut + 1 :] = False
         second[:, : cut + 1] = False
     return first, second
+
+
+def _spatial_split(binary: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    ys, xs = np.nonzero(binary)
+    if len(xs) < 2:
+        return None
+
+    points = np.column_stack((xs, ys)).astype(np.float64)
+    center = points.mean(axis=0)
+    first_index = int(np.argmax(np.sum((points - center) ** 2, axis=1)))
+    second_index = int(
+        np.argmax(np.sum((points - points[first_index]) ** 2, axis=1))
+    )
+    if first_index == second_index:
+        return None
+
+    centers = points[[first_index, second_index]]
+    labels = np.zeros(len(points), dtype=np.int8)
+    for _ in range(50):
+        first_distances = np.sum((points - centers[0]) ** 2, axis=1)
+        second_distances = np.sum((points - centers[1]) ** 2, axis=1)
+        updated_labels = (second_distances < first_distances).astype(np.int8)
+        if np.all(updated_labels == updated_labels[0]):
+            return None
+        updated_centers = np.vstack(
+            [points[updated_labels == label].mean(axis=0) for label in (0, 1)]
+        )
+        if np.array_equal(updated_labels, labels):
+            labels = updated_labels
+            break
+        labels = updated_labels
+        centers = updated_centers
+
+    first = np.zeros(binary.shape, dtype=bool)
+    second = np.zeros(binary.shape, dtype=bool)
+    first[ys[labels == 0], xs[labels == 0]] = True
+    second[ys[labels == 1], xs[labels == 1]] = True
+    if not first.any() or not second.any():
+        return None
+    return first, second
+
+
+def _watershed_split(binary: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
+    if not binary.any():
+        return None
+
+    distance = ndimage.distance_transform_edt(binary)
+    smoothed = ndimage.gaussian_filter(distance, sigma=2.0)
+    peak_spacing = max(5, int(min(binary.shape) * 0.04))
+    local_maxima = (
+        (smoothed == ndimage.maximum_filter(smoothed, size=2 * peak_spacing + 1))
+        & binary
+        & (smoothed >= float(smoothed.max()) * 0.18)
+    )
+    peak_labels, peak_count = ndimage.label(local_maxima)
+
+    peaks: list[tuple[float, int, int]] = []
+    for label in range(1, peak_count + 1):
+        ys, xs = np.nonzero(peak_labels == label)
+        if not len(xs):
+            continue
+        best_index = int(np.argmax(smoothed[ys, xs]))
+        peaks.append(
+            (
+                float(smoothed[ys[best_index], xs[best_index]]),
+                int(ys[best_index]),
+                int(xs[best_index]),
+            )
+        )
+    if len(peaks) < 2:
+        return None
+
+    peak_pair = max(
+        (
+            (first, second)
+            for index, first in enumerate(peaks)
+            for second in peaks[index + 1 :]
+        ),
+        key=lambda pair: min(pair[0][0], pair[1][0])
+        * np.hypot(pair[0][1] - pair[1][1], pair[0][2] - pair[1][2]),
+    )
+    if np.hypot(
+        peak_pair[0][1] - peak_pair[1][1],
+        peak_pair[0][2] - peak_pair[1][2],
+    ) < max(6, int(min(binary.shape) * 0.04)):
+        return None
+
+    markers = np.zeros(binary.shape, dtype=np.int32)
+    for label, (_, y, x) in enumerate(peak_pair, start=1):
+        markers[y, x] = label
+
+    interior_distance = smoothed[binary]
+    topography = np.full(binary.shape, 255, dtype=np.uint8)
+    topography[binary] = np.clip(
+        255.0 * (1.0 - smoothed[binary] / float(interior_distance.max())),
+        0,
+        255,
+    ).astype(np.uint8)
+    labels = ndimage.watershed_ift(topography, markers)
+    parts = tuple(binary & (labels == label) for label in (1, 2))
+    if not parts[0].any() or not parts[1].any():
+        return None
+    return parts[0], parts[1]
+
+
+def _balanced_split(
+    split: tuple[np.ndarray, np.ndarray] | None,
+    total_area: int,
+) -> bool:
+    if split is None or total_area == 0:
+        return False
+    smaller_area = min(int(part.sum()) for part in split)
+    return smaller_area >= total_area * 0.12
 
 
 def mask_components(
@@ -138,14 +252,38 @@ def mask_components(
         component[ys, xs] = 255
         components.append((len(pixels), Image.fromarray(component)))
 
-    if expected_count is not None and len(components) < expected_count:
-        split = _projection_split(binary) if expected_count == 2 else None
-        if split is not None:
-            components = [
-                (int(part.sum()), Image.fromarray(part.astype(np.uint8) * 255))
-                for part in split
-                if part.any()
-            ]
+    if expected_count is not None:
+        while len(components) < expected_count:
+            if not components:
+                break
+            split_index = max(range(len(components)), key=lambda index: components[index][0])
+            component_mask = np.asarray(components[split_index][1]) > 0
+            component_area = int(component_mask.sum())
+            split_candidates = (
+                _projection_split(component_mask),
+                _watershed_split(component_mask),
+                _spatial_split(component_mask),
+            )
+            split = next(
+                (
+                    candidate
+                    for candidate in split_candidates
+                    if _balanced_split(candidate, component_area)
+                ),
+                None,
+            )
+            if split is None:
+                break
+            first, second = split
+            if min(int(first.sum()), int(second.sum())) < 1:
+                break
+            components.pop(split_index)
+            components.extend(
+                (
+                    (int(part.sum()), Image.fromarray(part.astype(np.uint8) * 255))
+                    for part in (first, second)
+                )
+            )
 
     return sorted(components, key=lambda item: item[0], reverse=True)
 

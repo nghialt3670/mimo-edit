@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from pathlib import Path
 from typing import Callable, Iterable
 
@@ -42,6 +44,48 @@ def _load_resume_state(output: Path, failures: Path) -> tuple[set[str], dict[str
     return accepted_ids, previous_status
 
 
+def _write_output_sample(output: Path, sample_id: str, record: dict) -> None:
+    if not output.exists():
+        append_jsonl(output, record)
+        return
+    serialized = json.dumps(record, ensure_ascii=False) + "\n"
+    temporary_path: Path | None = None
+    replaced = False
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=output.parent,
+            prefix=f"{output.name}.",
+            suffix=".tmp",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            with output.open(encoding="utf-8") as source:
+                for line_number, line in enumerate(source, 1):
+                    if not line.strip():
+                        temporary.write(line)
+                        continue
+                    try:
+                        record = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(
+                            f"Invalid JSONL in {output} at line {line_number}"
+                        ) from exc
+                    if str(record.get("sample_id", "")) != sample_id:
+                        temporary.write(line)
+                    elif not replaced:
+                        temporary.write(serialized)
+                        replaced = True
+            if not replaced:
+                temporary.write(serialized)
+        os.replace(temporary_path, output)
+    except Exception:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+        raise
+
+
 def convert_rows(
     rows: Iterable[dict],
     adapter: Adapter,
@@ -51,6 +95,7 @@ def convert_rows(
     failures: str | Path | None = None,
     limit: int | None = None,
     save_assets: bool = True,
+    overwrite_sample_ids: set[str] | None = None,
 ) -> dict[str, int]:
     """Append new results, skipping completed samples and retrying audited samples.
 
@@ -63,6 +108,7 @@ def convert_rows(
     )
     output.parent.mkdir(parents=True, exist_ok=True)
     accepted_ids, previous_status = _load_resume_state(output, failures)
+    overwrite_sample_ids = overwrite_sample_ids or set()
 
     counts = {"accepted": 0, "skipped": 0, "failed": 0, "resumed": 0, "retried": 0}
     iterator = enumerate(rows)
@@ -75,7 +121,9 @@ def convert_rows(
             sample = adapter(row, split, i)
             sample_id = str(sample.sample_id)
             status = previous_status.get(sample_id)
-            if sample_id in accepted_ids or sample_id in attempted_ids:
+            if (
+                sample_id in accepted_ids and sample_id not in overwrite_sample_ids
+            ) or sample_id in attempted_ids:
                 counts["resumed"] += 1
                 continue
             if limit is not None and attempted_count >= limit:
@@ -89,7 +137,11 @@ def convert_rows(
             record = annotator.annotate(sample)
             if save_assets:
                 save_reference_assets(sample, record, output)
-            append_jsonl(output, record.model_dump(mode="json"))
+            serialized_record = record.model_dump(mode="json")
+            if sample_id in overwrite_sample_ids:
+                _write_output_sample(output, sample_id, serialized_record)
+            else:
+                append_jsonl(output, serialized_record)
             counts["accepted"] += 1
             accepted_ids.add(sample_id)
         except NoReferenceError as exc:

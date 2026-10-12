@@ -169,6 +169,7 @@ def run_hf_annotation(
     expected_columns: set[str],
     use_grounder: bool,
     row_filter: Callable[[dict[str, Any]], bool] | None = None,
+    overwrite_sample_ids: set[str] | None = None,
 ) -> dict[str, int]:
     """Load a dataset split, validate its adapter contract, and annotate rows."""
     from datasets import load_dataset
@@ -196,4 +197,5 @@ def run_hf_annotation(
         output=config.output_dir / output_name,
         failures=config.output_dir / audit_name,
         limit=config.limit,
+        overwrite_sample_ids=overwrite_sample_ids,
     )
