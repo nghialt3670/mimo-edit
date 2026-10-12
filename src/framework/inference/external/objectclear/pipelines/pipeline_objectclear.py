@@ -601,6 +601,7 @@ class ObjectClearPipeline(
         original_state = {}
         self._objectclear_attention_grid = None
         self._objectclear_attention_heads = None
+        attention_scores.clear()
 
         def make_new_get_attention_scores_fn(name, original_get_attention_scores):
             def new_get_attention_scores(module, query, key, attention_mask=None):
@@ -608,7 +609,14 @@ class ObjectClearPipeline(
                     query, key, attention_mask
                 )
                 if name == TARGET_LAYER:
-                    attention_scores[name] = attention_probs
+                    previous_attention_probs = attention_scores.get(name)
+                    attention_scores[name] = (
+                        attention_probs
+                        if previous_attention_probs is None
+                        else torch.cat(
+                            (previous_attention_probs, attention_probs), dim=0
+                        )
+                    )
                 return attention_probs
 
             return new_get_attention_scores
