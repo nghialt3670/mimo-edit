@@ -15,6 +15,7 @@ from framework.inference.external.objectclear.pipelines.pipeline_objectclear imp
 class FakeAttention:
     def __init__(self) -> None:
         self.processor = FakeAttnProcessor2_0()
+        self.heads = 5
 
     def get_attention_scores(self, query, key, attention_mask=None):
         return "original attention scores"
@@ -74,6 +75,22 @@ class ObjectClearAttentionHookTests(unittest.TestCase):
             mask,
             fuse_index=5,
             attention_grid=(24, 30),
+            attention_heads=2,
+        )
+
+        self.assertEqual(tuple(result.shape), (2, 1, 48, 48))
+
+    def test_single_attention_batch_expands_to_cfg_mask_batch(self) -> None:
+        attention = torch.ones((5, 576, 7))
+        mask = torch.ones((2, 1, 48, 48))
+
+        result = ObjectClearPipeline.resize_attn_map_divide2(
+            SimpleNamespace(),
+            attention,
+            mask,
+            fuse_index=5,
+            attention_grid=(24, 24),
+            attention_heads=5,
         )
 
         self.assertEqual(tuple(result.shape), (2, 1, 48, 48))

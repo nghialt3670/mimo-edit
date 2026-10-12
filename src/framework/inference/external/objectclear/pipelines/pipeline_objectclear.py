@@ -600,6 +600,7 @@ class ObjectClearPipeline(
         TARGET_LAYER = "down_blocks.1.attentions.0.transformer_blocks.0.attn2"
         original_state = {}
         self._objectclear_attention_grid = None
+        self._objectclear_attention_heads = None
 
         def make_new_get_attention_scores_fn(name, original_get_attention_scores):
             def new_get_attention_scores(module, query, key, attention_mask=None):
@@ -631,6 +632,7 @@ class ObjectClearPipeline(
                     "processor": original_processor,
                     "get_attention_scores": original_get_attention_scores,
                 }
+                self._objectclear_attention_heads = module.heads
                 module._objectclear_original_processor = original_processor
                 module._objectclear_original_get_attention_scores = (
                     original_get_attention_scores
@@ -699,16 +701,19 @@ class ObjectClearPipeline(
                     delattr(transformer, "_objectclear_spatial_hook")
         return unet
 
-    def resize_attn_map_divide2(self, attn_map, mask, fuse_index, attention_grid):
+    def resize_attn_map_divide2(
+        self, attn_map, mask, fuse_index, attention_grid, attention_heads
+    ):
         bxh, num_noise_latents, num_text_tokens = attn_map.shape
         b, max_num_objects, H, W = mask.shape
 
         attn_map = attn_map[:, :, fuse_index : fuse_index + 1]
-        if bxh % b:
+        if bxh % attention_heads:
             raise ValueError(
-                f"Attention batch-head dimension {bxh} is not divisible by mask "
-                f"batch size {b}."
+                f"Attention batch-head dimension {bxh} is not divisible by the "
+                f"attention layer's {attention_heads} heads."
             )
+        attention_batch = bxh // attention_heads
 
         attention_height, attention_width = attention_grid
         if attention_height * attention_width != num_noise_latents:
@@ -717,9 +722,17 @@ class ObjectClearPipeline(
                 f"{attention_grid!r} does not match the attention map's "
                 f"{num_noise_latents} spatial tokens."
             )
-        num_heads = bxh // b
-        attn_map = attn_map.view(b, num_heads, attention_height, attention_width)
+        attn_map = attn_map.view(
+            attention_batch, attention_heads, attention_height, attention_width
+        )
         attn_map = attn_map.mean(dim=1, keepdim=True)
+        if attention_batch < b and b % attention_batch == 0:
+            attn_map = attn_map.repeat_interleave(b // attention_batch, dim=0)
+        elif attention_batch != b:
+            raise ValueError(
+                f"Attention batch size {attention_batch} does not match mask batch "
+                f"size {b}; cannot align attention-guided fusion."
+            )
         attn_map = F.interpolate(
             attn_map, size=(H, W), mode="bilinear", align_corners=False
         )
@@ -2266,11 +2279,18 @@ class ObjectClearPipeline(
                                 "ObjectClear did not capture the spatial dimensions "
                                 "of its attention layer."
                             )
+                        attention_heads = self._objectclear_attention_heads
+                        if attention_heads is None:
+                            raise RuntimeError(
+                                "ObjectClear did not capture the head count of its "
+                                "attention layer."
+                            )
                         attn_map = self.resize_attn_map_divide2(
                             attn_map,
                             mask,
                             fuse_index,
                             attention_grid=attention_grid,
+                            attention_heads=attention_heads,
                         )
                         init_latents_proper = image_latents
                         if self.do_classifier_free_guidance:
