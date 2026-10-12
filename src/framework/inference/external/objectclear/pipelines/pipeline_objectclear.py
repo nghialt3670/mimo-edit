@@ -599,10 +599,11 @@ class ObjectClearPipeline(
 
         TARGET_LAYER = "down_blocks.1.attentions.0.transformer_blocks.0.attn2"
         original_state = {}
+        self._objectclear_attention_grid = None
 
-        def make_new_get_attention_scores_fn(name):
+        def make_new_get_attention_scores_fn(name, original_get_attention_scores):
             def new_get_attention_scores(module, query, key, attention_mask=None):
-                attention_probs = module.old_get_attention_scores(
+                attention_probs = original_get_attention_scores(
                     query, key, attention_mask
                 )
                 if name == TARGET_LAYER:
@@ -611,23 +612,65 @@ class ObjectClearPipeline(
 
             return new_get_attention_scores
 
+        modules = dict(unet.named_modules())
         for name, module in unet.named_modules():
             if (
                 isinstance(module, Attention)
                 and name == TARGET_LAYER
                 and "attn2" in name
             ):
+                original_processor = getattr(
+                    module, "_objectclear_original_processor", module.processor
+                )
+                original_get_attention_scores = getattr(
+                    module,
+                    "_objectclear_original_get_attention_scores",
+                    module.get_attention_scores,
+                )
                 original_state[name] = {
-                    "processor": module.processor,
-                    "get_attention_scores": module.get_attention_scores,
+                    "processor": original_processor,
+                    "get_attention_scores": original_get_attention_scores,
                 }
+                module._objectclear_original_processor = original_processor
+                module._objectclear_original_get_attention_scores = (
+                    original_get_attention_scores
+                )
                 if isinstance(module.processor, AttnProcessor2_0):
                     module.set_processor(AttnProcessor())
-                module.old_get_attention_scores = module.get_attention_scores
-                module.new_get_attention_scores = types.MethodType(
-                    make_new_get_attention_scores_fn(name), module
+                module.get_attention_scores = types.MethodType(
+                    make_new_get_attention_scores_fn(
+                        name, original_get_attention_scores
+                    ),
+                    module,
                 )
-                module.get_attention_scores = module.new_get_attention_scores
+                transformer_name = name.rsplit(".transformer_blocks.", 1)[0]
+                transformer = modules.get(transformer_name)
+                if transformer is None:
+                    raise RuntimeError(
+                        "Could not find the ObjectClear transformer block for "
+                        f"attention layer {name!r}."
+                    )
+                old_spatial_hook = getattr(
+                    transformer, "_objectclear_spatial_hook", None
+                )
+                if old_spatial_hook is not None:
+                    old_spatial_hook.remove()
+
+                def capture_attention_grid(transformer, args, kwargs):
+                    hidden_states = kwargs.get("hidden_states")
+                    if hidden_states is None and args:
+                        hidden_states = args[0]
+                    if isinstance(hidden_states, torch.Tensor) and hidden_states.ndim == 4:
+                        self._objectclear_attention_grid = tuple(
+                            hidden_states.shape[-2:]
+                        )
+
+                spatial_hook = transformer.register_forward_pre_hook(
+                    capture_attention_grid, with_kwargs=True
+                )
+                transformer._objectclear_spatial_hook = spatial_hook
+                original_state[name]["transformer"] = transformer
+                original_state[name]["spatial_hook"] = spatial_hook
 
         return unet, original_state
 
@@ -644,21 +687,38 @@ class ObjectClearPipeline(
                     "get_attention_scores"
                 ]
                 module.set_processor(original_state[name]["processor"])
-                if hasattr(module, "old_get_attention_scores"):
-                    delattr(module, "old_get_attention_scores")
-                if hasattr(module, "new_get_attention_scores"):
-                    delattr(module, "new_get_attention_scores")
+                for attribute in (
+                    "_objectclear_original_processor",
+                    "_objectclear_original_get_attention_scores",
+                ):
+                    if hasattr(module, attribute):
+                        delattr(module, attribute)
+                transformer = original_state[name]["transformer"]
+                original_state[name]["spatial_hook"].remove()
+                if hasattr(transformer, "_objectclear_spatial_hook"):
+                    delattr(transformer, "_objectclear_spatial_hook")
         return unet
 
-    def resize_attn_map_divide2(self, attn_map, mask, fuse_index):
+    def resize_attn_map_divide2(self, attn_map, mask, fuse_index, attention_grid):
         bxh, num_noise_latents, num_text_tokens = attn_map.shape
         b, max_num_objects, H, W = mask.shape
-        target_tokens = H * W
 
         attn_map = attn_map[:, :, fuse_index : fuse_index + 1]
-        # attn_size = int(num_noise_latents**0.5)
+        if bxh % b:
+            raise ValueError(
+                f"Attention batch-head dimension {bxh} is not divisible by mask "
+                f"batch size {b}."
+            )
+
+        attention_height, attention_width = attention_grid
+        if attention_height * attention_width != num_noise_latents:
+            raise ValueError(
+                "Captured ObjectClear attention grid "
+                f"{attention_grid!r} does not match the attention map's "
+                f"{num_noise_latents} spatial tokens."
+            )
         num_heads = bxh // b
-        attn_map = attn_map.view(b, num_heads, H // 2, W // 2)
+        attn_map = attn_map.view(b, num_heads, attention_height, attention_width)
         attn_map = attn_map.mean(dim=1, keepdim=True)
         attn_map = F.interpolate(
             attn_map, size=(H, W), mode="bilinear", align_corners=False
@@ -2200,8 +2260,17 @@ class ObjectClearPipeline(
                         attn_key, attn_map = next(
                             iter(self.cross_attention_scores.items())
                         )
+                        attention_grid = self._objectclear_attention_grid
+                        if attention_grid is None:
+                            raise RuntimeError(
+                                "ObjectClear did not capture the spatial dimensions "
+                                "of its attention layer."
+                            )
                         attn_map = self.resize_attn_map_divide2(
-                            attn_map, mask, fuse_index
+                            attn_map,
+                            mask,
+                            fuse_index,
+                            attention_grid=attention_grid,
                         )
                         init_latents_proper = image_latents
                         if self.do_classifier_free_guidance:
