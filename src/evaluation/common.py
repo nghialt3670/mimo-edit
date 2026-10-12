@@ -5,6 +5,7 @@ import hashlib
 import json
 import random
 import re
+import shutil
 import time
 import traceback
 from collections.abc import Iterable, Iterator
@@ -670,6 +671,23 @@ def run_one(
     return entry
 
 
+def _clear_sample_artifacts(output_dir: Path, record: dict[str, Any], index: int) -> Path:
+    sample_id = record.get("sample_id") or f"annotation_{index}"
+    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", str(sample_id)).strip("._") or "sample"
+    file_stem = f"{index:06d}_{safe_id}"
+    log_dir = output_dir / "logs" / file_stem
+    images_dir = output_dir / "results" / "images"
+
+    if log_dir.is_symlink():
+        log_dir.unlink()
+    elif log_dir.exists():
+        shutil.rmtree(log_dir)
+
+    for suffix in ("source", "annotated", "output", "target"):
+        (images_dir / f"{file_stem}_{suffix}.png").unlink(missing_ok=True)
+    return log_dir
+
+
 def run_benchmark(
     records: list[dict[str, Any]],
     sample_indices: Iterable[int],
@@ -766,6 +784,19 @@ def run_benchmark(
             status="running",
             refresh=True,
         )
+        if rerun_completed:
+            log_dir = _clear_sample_artifacts(
+                output_dir, records[annotation_index], annotation_index
+            )
+            results_by_index[annotation_index] = {
+                "benchmark": benchmark,
+                "prompt_mode": prompt_mode,
+                "sample_id": sample_id,
+                "annotation_index": annotation_index,
+                "status": "running",
+                "log_dir": str(log_dir),
+            }
+            persist_results()
         result = run_one(
             records[annotation_index],
             annotation_index,

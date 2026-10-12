@@ -53,8 +53,8 @@ def _parse_args() -> argparse.Namespace:
         "--rerun-completed",
         action="store_true",
         help=(
-            "With --resume, rerun completed samples in the selected index range "
-            "instead of skipping them."
+            "With --resume, rerun every selected sample after removing its old logs "
+            "and generated images."
         ),
     )
     parser.add_argument(
