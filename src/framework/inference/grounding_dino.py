@@ -26,6 +26,10 @@ def grounding_dino_segment_region(
         text=text_labels,
         return_tensors="pt",
     ).to(pool.device)
+    model_dtype = pipelines.model.dtype
+    for name, value in inputs.items():
+        if isinstance(value, torch.Tensor) and torch.is_floating_point(value):
+            inputs[name] = value.to(dtype=model_dtype)
     with torch.inference_mode():
         outputs = pipelines.model(**inputs)
     result = pipelines.processor.post_process_grounded_object_detection(
@@ -39,7 +43,11 @@ def grounding_dino_segment_region(
     scores = result.get("scores")
     boxes = result.get("boxes")
     if scores is None or boxes is None or len(scores) == 0:
-        raise ValueError(f"No image region matched the description: {prompt!r}")
+        raise ValueError(
+            f"No image region matched the description: {prompt!r}. Try a concise "
+            "description of a visible object or select it with a point, box, or "
+            "scribble using segment_object."
+        )
 
     best_index = int(scores.argmax().item())
     x0, y0, x1, y1 = (float(coordinate) for coordinate in boxes[best_index].tolist())

@@ -10,6 +10,7 @@ from PIL import Image
 from framework.core.agent import _SYSTEM_PROMPT
 from framework.inference.grounding_dino import grounding_dino_segment_region
 from framework.tools import registry
+from framework.tools.image_editing.segment_object import segment_object
 
 
 class GroundingDinoSegmentRegionTests(unittest.TestCase):
@@ -20,8 +21,11 @@ class GroundingDinoSegmentRegionTests(unittest.TestCase):
             def to(self, device):
                 return self
 
-        self.inputs = Inputs()
-        self.model = Mock()
+        self.inputs = Inputs(
+            input_ids=torch.tensor([[1]]),
+            pixel_values=torch.ones((1, 3, 2, 2), dtype=torch.float32),
+        )
+        self.model = Mock(dtype=torch.float16)
         self.processor = Mock()
         self.processor.return_value = self.inputs
         self.pool = SimpleNamespace(
@@ -57,9 +61,7 @@ class GroundingDinoSegmentRegionTests(unittest.TestCase):
             "framework.inference.grounding_dino.sam3_segment_mask",
             return_value=expected_mask,
         ) as segment:
-            result = grounding_dino_segment_region(
-                self.pool, self.image, "  the car. "
-            )
+            result = grounding_dino_segment_region(self.pool, self.image, "  the car. ")
 
         self.assertIs(result, expected_mask)
         self.processor.assert_called_once_with(
@@ -75,6 +77,10 @@ class GroundingDinoSegmentRegionTests(unittest.TestCase):
             target_sizes=[(80, 100)],
             text_labels=[["the car"]],
         )
+        self.model.assert_called_once()
+        model_inputs = self.model.call_args.kwargs
+        self.assertEqual(model_inputs["pixel_values"].dtype, torch.float16)
+        self.assertEqual(model_inputs["input_ids"].dtype, torch.int64)
         segment.assert_called_once_with(
             self.pool,
             self.image,
@@ -93,11 +99,25 @@ class GroundingDinoSegmentRegionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-empty"):
             grounding_dino_segment_region(self.pool, self.image, " ")
 
+    def test_empty_sam_text_result_suggests_recovery_methods(self):
+        with patch(
+            "framework.tools.image_editing.segment_object.sam3_segment_masks",
+            return_value=[],
+        ):
+            with self.assertRaisesRegex(ValueError, "segment_region"):
+                segment_object(
+                    SimpleNamespace(model_pool=self.pool),
+                    self.image,
+                    text="mouse",
+                )
+
     def test_segment_region_is_registered_and_agent_prompt_is_mode_agnostic(self):
         tool_names = {tool.name for tool in registry.build()}
 
         self.assertIn("segment_region", tool_names)
         self.assertNotIn("mixed visual-prompt mode", _SYSTEM_PROMPT)
+        self.assertIn("do not import Pillow", _SYSTEM_PROMPT)
+        self.assertIn("finite, ordered", _SYSTEM_PROMPT)
 
 
 if __name__ == "__main__":

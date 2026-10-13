@@ -3,11 +3,12 @@
 This document describes the tools registered by
 [`src/framework/tools/image_editing/`](../src/framework/tools/image_editing/) and built by
 [`image_editing_tools`](../src/framework/tools/__init__.py). The registry currently exposes
-11 tools:
+12 tools:
 
 | Tool | Purpose | Backbone |
 | --- | --- | --- |
 | [`segment_object`](../src/framework/tools/image_editing/segment_object.py) | Find one object and return its mask | SAM 3 |
+| [`segment_region`](../src/framework/tools/image_editing/segment_region.py) | Ground a text description and return its mask | Grounding DINO + SAM 3 |
 | [`edit_object`](../src/framework/tools/image_editing/edit_object.py) | Semantically edit one masked object | FLUX.2 Klein base 4B |
 | [`remove_object`](../src/framework/tools/image_editing/remove_object.py) | Remove one masked object | ObjectClear |
 | [`replace_object`](../src/framework/tools/image_editing/replace_object.py) | Remove an object, then paste a replacement image | ObjectClear + Pillow |
@@ -31,15 +32,18 @@ inference settings are documented in
   Masks are resized to the source image size by the relevant image utilities.
 - Boxes are pixel coordinates `[x1, y1, x2, y2]` in the source image. Points and
   offsets use pixel coordinates too; positive x moves right and positive y moves
-  down.
+  down. Box coordinates must be finite, ordered, and inside the image.
 - Tools operate on one selected object per call. For multiple objects, segment
   and edit/remove each object in separate calls, using the latest returned image
   as the next call's input.
 - `segment_object` creates masks. Other object-targeting tools consume a mask;
   they do not automatically identify the object from a text description.
+- `segment_region` grounds a natural-language description to a box with
+  Grounding DINO, then uses SAM 3 to return a pixel mask for that region.
 - Model-backed tools use one eagerly initialized `ModelPool`. Constructing it
   loads Klein, SAM 3, and ObjectClear together, so confirm that the host has
-  enough memory before creating the tool set. Reuse the pool across calls.
+  enough memory before creating the tool set. Grounding DINO loads only when
+  `segment_region` is first used. Reuse the pool across calls.
 
 ## Tool interfaces and behavior
 
@@ -66,10 +70,27 @@ where the selected region is white.
 
 An empty/whitespace-only text prompt, missing selector, multiple selectors,
 malformed point, empty scribble, or a text prompt with no matching object raises
-an error.
+an error. If text segmentation finds no match, retry with a concise visible-object
+description using `segment_region`, or select the object with a point, box, or
+scribble; do not repeat near-identical text prompts.
 
 **Backbone:** `facebook/sam3` by default. Both the text and visual-prompt
 pathways share the lazily loaded SAM 3 model bundle.
+
+### `segment_region`
+
+**Backbone:** Grounding DINO (`IDEA-Research/grounding-dino-tiny`) for text
+grounding followed by SAM 3 for mask refinement.
+
+| Name | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `image` | Image | Yes | Source image. |
+| `prompt` | String | Yes | Natural-language description of the object or region. |
+
+Grounding DINO selects the highest-scoring matching box using the configured
+box and text thresholds. SAM 3 then refines that box into a single-channel
+white-on-black mask. If no region matches, the tool raises an error. The
+Grounding DINO model bundle loads lazily on first use and is reused afterward.
 
 ### `edit_object`
 
@@ -270,12 +291,13 @@ Unsupported filter names and values outside `[-1, 1]` raise an error.
 ## Inference configuration and runtime
 
 The framework uses fixed backbones: FLUX.2 Klein base 4B for editing and generation,
-SAM 3 for segmentation, and ObjectClear for removal. `InferenceConfig` contains
-their inference settings rather than model IDs:
+SAM 3 for segmentation, Grounding DINO for text-region grounding, and ObjectClear
+for removal. `InferenceConfig` contains their inference settings rather than model IDs:
 
 ```python
 from framework import (
     InferenceConfig,
+    GroundingDinoInferenceConfig,
     KleinInferenceConfig,
     ObjectClearInferenceConfig,
     image_editing_tools,
@@ -284,6 +306,10 @@ from framework import (
 tools = image_editing_tools(
     inference_config=InferenceConfig(
         klein=KleinInferenceConfig(num_inference_steps=6),
+        grounding_dino=GroundingDinoInferenceConfig(
+            box_threshold=0.35,
+            text_threshold=0.25,
+        ),
         object_clear=ObjectClearInferenceConfig(guidance_scale=2.5),
     )
 )
@@ -291,6 +317,7 @@ tools = image_editing_tools(
 
 `KleinInferenceConfig` controls `num_inference_steps`, `guidance_scale`, and
 `mask_context_padding`.
+`GroundingDinoInferenceConfig` controls the box and text confidence thresholds.
 `Sam3InferenceConfig` controls `mask_threshold`. `ObjectClearInferenceConfig`
 controls `num_inference_steps`,
 `guidance_scale`, and `working_min_side`. The required project-wide
@@ -300,7 +327,8 @@ SAM 3. Defaults preserve the existing inference settings.
 
 At runtime, the model device is selected in this order: Apple MPS when
 available, otherwise CUDA, otherwise CPU. `ModelPool` eagerly loads Klein,
-SAM 3, and ObjectClear during construction; tools constructed together by
+SAM 3, and ObjectClear during construction; it loads Grounding DINO on the first
+`segment_region` call. Tools constructed together by
 `image_editing_tools()` share the same pool. For explicit pool reuse, pass it
 as the first argument:
 

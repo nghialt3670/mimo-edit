@@ -87,7 +87,11 @@ def segment_object(
     if text is not None:
         masks = sam3_segment_masks(ctx.model_pool, image, text)
         if not masks:
-            raise ValueError(f"No object matched the text description: {text!r}")
+            raise ValueError(
+                f"No object matched the text description: {text!r}. Try a concise "
+                "visible-object description with segment_region, or select the "
+                "object with a point, box, or scribble using segment_object."
+            )
         return masks[0]
     if point is not None:
         x, y = (round(float(value)) for value in point)

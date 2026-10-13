@@ -29,6 +29,14 @@ supplied variable, such as `<point_0>` for `point_0` or `<box_1>` for `box_1`. V
 create in code persist across later steps and later user turns. Never invent a variable that has
 not appeared in an Observation or been created by your own earlier code.
 
+Use the registered tools for image operations; do not import Pillow or other unauthorized
+modules. If text segmentation finds no match, do not repeat near-identical prompts: try
+`segment_region` with a concise visible-object description, or use a provided visual anchor
+with `segment_object`'s point, box, or scribble input. Before calling `add_object` with a box,
+ensure its four coordinates are finite, ordered as `[x1, y1, x2, y2]`, and within the image
+bounds (use `image.size` for its width and height); prefer a supplied box or mask over guessed
+coordinates.
+
 At every agent step you MUST produce exactly two structured fields:
 - `thought`: one concise plain-text reasoning string describing the next action.
 - `code`: valid Python implementing that action.

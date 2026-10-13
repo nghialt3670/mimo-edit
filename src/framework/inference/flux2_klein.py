@@ -303,7 +303,7 @@ def flux2_klein_add_object_with_mask(
         inference_config,
     )
     if edited.size != working_image.size:
-        raise ValueError(f"Klein returned {edited.size}, expected {working_image.size}")
+        edited = edited.resize(working_image.size, Image.Resampling.LANCZOS)
 
     crop_mask = mask.crop(crop_box)
     edited_crop = edited.resize(original_crop.size, Image.Resampling.LANCZOS)
