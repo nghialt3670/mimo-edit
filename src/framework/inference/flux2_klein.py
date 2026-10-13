@@ -153,7 +153,7 @@ def _generate_klein_edit(
 
 
 # Shared settings for distilled FLUX.2 Klein 4B.
-PADDING_FRAC = 0.60
+PADDING_FRAC = 0.4
 WORK_SIZE = 1024
 EDGE_BLEND_PX = 12
 
