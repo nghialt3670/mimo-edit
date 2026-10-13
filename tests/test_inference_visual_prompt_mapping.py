@@ -72,7 +72,26 @@ class InferenceVisualPromptMappingTests(unittest.TestCase):
         self.assertIn("point_0", objects)
         self.assertNotIn("<v1>", task)
         self.assertIn("<point_0>", context)
+        self.assertNotIn("surfboard", context)
         self.assertEqual(sample["references"][0]["display_token"], "<point_0>")
+
+    def test_mixed_spatial_destination_keeps_placement_description(self):
+        sample = {
+            "instruction": "Add a bridge at <box_0>.",
+            "references": [
+                {
+                    "token": "<v1>",
+                    "display_token": "<box_0>",
+                    "span": "below the mountain",
+                    "selected_prompt": {"type": "box", "variable": "box_0"},
+                    "spatial_destination": True,
+                }
+            ],
+        }
+
+        context = build_agent_context(sample)
+
+        self.assertIn("below the mountain", context)
 
     def test_text_mode_keeps_instruction_without_visual_prompt_tokens(self):
         sample = {

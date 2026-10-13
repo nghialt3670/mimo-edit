@@ -255,7 +255,12 @@ def build_agent_context(
         token = ref.get("display_token") or ref["token"] or f"reference_{index}"
         selected = ref.get("selected_prompt")
         description = ref.get("span")
-        description_line = f" refers to {description!r};" if description else ""
+        description_line = (
+            f" refers to {description!r};"
+            if description
+            and (prompt_mode == "text" or ref.get("spatial_destination"))
+            else ""
+        )
         if prompt_mode == "text":
             if description:
                 lines.append(
