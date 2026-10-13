@@ -57,7 +57,7 @@ class TerminalExecutor(PythonExecutor):
 def local_executor(*, timeout_seconds: int | None = 30) -> TerminalExecutor:
     return TerminalExecutor(
         LocalPythonExecutor(
-            additional_authorized_imports=[],
+            additional_authorized_imports=["numpy"],
             timeout_seconds=timeout_seconds,
         )
     )
