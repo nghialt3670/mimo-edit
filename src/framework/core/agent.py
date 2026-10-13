@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import inspect
 import json
+import time
 from collections.abc import Iterable
+from inspect import Parameter, Signature
+from types import MethodType
 from typing import Any
 
 from smolagents import CodeAgent, Tool
@@ -73,6 +77,28 @@ _PROMPTS = {
 }
 
 
+def _prompt_text_characters(messages: list[Any]) -> int:
+    character_count = 0
+    for message in messages:
+        content = (
+            message.get("content")
+            if isinstance(message, dict)
+            else getattr(message, "content", None)
+        )
+        if isinstance(content, str):
+            character_count += len(content)
+        elif isinstance(content, list):
+            for item in content:
+                text = (
+                    item.get("text")
+                    if isinstance(item, dict)
+                    else getattr(item, "text", None)
+                )
+                if isinstance(text, str):
+                    character_count += len(text)
+    return character_count
+
+
 class SendMessageTool(Tool):
     name = "send_message"
     description = "Send text and optional Python objects to the user, ending only the current turn."
@@ -94,13 +120,130 @@ class _ObservationCodeAgent(CodeAgent):
     """Render every task as an Observation, including later user turns."""
 
     def write_memory_to_messages(self, summary_mode: bool = False):
+        started_at = time.perf_counter()
         messages = self.memory.system_prompt.to_messages(summary_mode=summary_mode)
         for step in self.memory.steps:
             step_messages = step.to_messages(summary_mode=summary_mode)
             if isinstance(step, TaskStep) and step_messages:
                 step_messages[0].content[0]["text"] = f"Observation:\n{step.task}"
             messages.extend(step_messages)
+        timing_records = getattr(self, "_timing_records", None)
+        if timing_records is not None and getattr(self, "_active_step_number", None):
+            timing_records["prompt_builds"].append(
+                {
+                    "step": self._active_step_number,
+                    "duration_seconds": time.perf_counter() - started_at,
+                    "message_count": len(messages),
+                    "text_characters": _prompt_text_characters(messages),
+                }
+            )
         return messages
+
+    def _step_stream(self, memory_step):
+        previous_step = getattr(self, "_active_step_number", None)
+        self._active_step_number = getattr(memory_step, "step_number", None)
+        timing_records = getattr(self, "_timing_records", None)
+        if timing_records is not None:
+            timing_records["_active_step_number"] = self._active_step_number
+        try:
+            yield from super()._step_stream(memory_step)
+        finally:
+            self._active_step_number = previous_step
+            if timing_records is not None:
+                timing_records["_active_step_number"] = previous_step
+
+
+class _TimedModel:
+    """Record elapsed time and token usage for model generation requests."""
+
+    def __init__(self, model: Any, timing_records: dict[str, list[dict[str, Any]]]):
+        self._model = model
+        self._timing_records = timing_records
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._model, name)
+
+    def generate(self, *args: Any, **kwargs: Any) -> Any:
+        started_at = time.perf_counter()
+        record: dict[str, Any] = {
+            "step": self._timing_records.get("_active_step_number"),
+        }
+        try:
+            response = self._model.generate(*args, **kwargs)
+            usage = getattr(response, "token_usage", None)
+            if usage is not None:
+                if isinstance(usage, dict):
+                    record["input_tokens"] = usage.get("input_tokens")
+                    record["output_tokens"] = usage.get("output_tokens")
+                else:
+                    record["input_tokens"] = getattr(usage, "input_tokens", None)
+                    record["output_tokens"] = getattr(usage, "output_tokens", None)
+            record["status"] = "completed"
+            return response
+        except Exception as exc:
+            record.update({"status": "failed", "error": repr(exc)})
+            raise
+        finally:
+            record["duration_seconds"] = time.perf_counter() - started_at
+            self._timing_records["llm_calls"].append(record)
+
+    def generate_stream(self, *args: Any, **kwargs: Any):
+        started_at = time.perf_counter()
+        record: dict[str, Any] = {
+            "step": self._timing_records.get("_active_step_number"),
+        }
+        try:
+            yield from self._model.generate_stream(*args, **kwargs)
+            record["status"] = "completed"
+        except Exception as exc:
+            record.update({"status": "failed", "error": repr(exc)})
+            raise
+        finally:
+            record["duration_seconds"] = time.perf_counter() - started_at
+            self._timing_records["llm_calls"].append(record)
+
+
+class _TimedTool(Tool):
+    """Wrap a tool while preserving its public schema and recording call duration."""
+
+    def __init__(
+        self, tool: Tool, timing_records: dict[str, list[dict[str, Any]]]
+    ) -> None:
+        self._tool = tool
+        self._timing_records = timing_records
+        self.name = tool.name
+        self.description = tool.description
+        self.inputs = tool.inputs
+        self.output_type = tool.output_type
+
+        def timed_forward(_self: _TimedTool, *args: Any, **kwargs: Any) -> Any:
+            started_at = time.perf_counter()
+            record: dict[str, Any] = {
+                "tool": _self.name,
+                "step": _self._timing_records.get("_active_step_number"),
+            }
+            try:
+                result = _self._tool.forward(*args, **kwargs)
+                record["status"] = "completed"
+                return result
+            except Exception as exc:
+                record.update({"status": "failed", "error": repr(exc)})
+                raise
+            finally:
+                record["duration_seconds"] = time.perf_counter() - started_at
+                _self._timing_records["tool_calls"].append(record)
+
+        original_signature = inspect.signature(tool.forward)
+        timed_forward.__signature__ = Signature(
+            [
+                Parameter("self", Parameter.POSITIONAL_OR_KEYWORD),
+                *original_signature.parameters.values(),
+            ],
+            return_annotation=original_signature.return_annotation,
+        )
+        timed_forward.__annotations__ = getattr(tool.forward, "__annotations__", {})
+        self.forward = MethodType(timed_forward, self)
+        super().__init__()
 
 
 class _ObservationFormatter:
@@ -156,6 +299,11 @@ class Agent:
         self.executor = executor
         self.verbosity_level = verbosity_level
         self.structured_thought = structured_thought
+        self.timing_records: dict[str, Any] = {
+            "prompt_builds": [],
+            "llm_calls": [],
+            "tool_calls": [],
+        }
         self._agent = self._build_agent()
         self._started = False
         self._last_raw: Any | None = None
@@ -177,9 +325,12 @@ class Agent:
         # Important: do not assign agent.system_prompt. In smolagents >=1.26 it is read-only.
         # final_answer remains internally registered so the executor can use it, but our Jinja
         # system prompt filters it out of the visible tool definitions.
-        return _ObservationCodeAgent(
-            model=self.model,
-            tools=[*self.tools, SendMessageTool()],
+        agent = _ObservationCodeAgent(
+            model=_TimedModel(self.model, self.timing_records),
+            tools=[
+                _TimedTool(tool, self.timing_records)
+                for tool in [*self.tools, SendMessageTool()]
+            ],
             prompt_templates=_PROMPTS,
             instructions=self.instructions,
             executor=terminal_executor,
@@ -190,6 +341,8 @@ class Agent:
             step_callbacks={ActionStep: _ObservationFormatter()},
             use_structured_outputs_internally=self.structured_thought,
         )
+        agent._timing_records = self.timing_records
+        return agent
 
     def send(self, text: str, *, objects: dict[str, Any] | None = None) -> TurnResult:
         """Append one user message and run until ``send_message`` terminates this turn."""
@@ -253,6 +406,13 @@ class Agent:
     @property
     def raw_steps(self) -> list[dict[str, Any]]:
         return list(self._agent.memory.get_full_steps())
+
+    @property
+    def timings(self) -> dict[str, list[dict[str, Any]]]:
+        return {
+            key: [dict(record) for record in self.timing_records[key]]
+            for key in ("prompt_builds", "llm_calls", "tool_calls")
+        }
 
     @property
     def inner(self) -> _ObservationCodeAgent:

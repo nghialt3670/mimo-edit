@@ -491,6 +491,16 @@ def json_safe(
         seen.discard(value_id)
 
 
+def _write_raw_agent_trajectory(
+    path: Path, raw_steps: list[dict[str, Any]], asset_dir: Path
+) -> None:
+    serialized_steps = json_safe(raw_steps, asset_dir, "agent_raw_trajectory")
+    path.write_text(
+        json.dumps(serialized_steps, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def run_one(
     record: dict[str, Any],
     annotation_index: int,
@@ -575,7 +585,13 @@ def run_one(
             executor=local_executor(timeout_seconds=AGENT_EXECUTION_TIMEOUT_SECONDS),
             verbosity_level=0,
         )
-        result = agent.send(task, objects=objects)
+        agent_started_at = time.perf_counter()
+        try:
+            result = agent.send(task, objects=objects)
+        finally:
+            entry["agent_elapsed_seconds"] = round(
+                time.perf_counter() - agent_started_at, 2
+            )
         images = [obj for obj in result.message.objects if isinstance(obj, Image.Image)]
         if not images:
             raise RuntimeError(
@@ -609,12 +625,14 @@ def run_one(
         entry["elapsed_seconds"] = round(time.perf_counter() - start, 2)
         trajectory_text_path = log_dir / "trajectory.txt"
         trajectory_json_path = log_dir / "trajectory.json"
+        raw_trajectory_path = log_dir / "agent_raw_trajectory.json"
         variables_json_path = log_dir / "variables.json"
         raw_json_path = log_dir / "raw.json"
         entry.update(
             {
                 "trajectory_text_path": str(trajectory_text_path),
                 "trajectory_json_path": str(trajectory_json_path),
+                "raw_trajectory_path": str(raw_trajectory_path),
                 "variables_path": str(variables_json_path),
                 "raw_path": str(raw_json_path),
             }
@@ -623,7 +641,37 @@ def run_one(
             trajectory = agent.trajectory if agent is not None else []
             trajectory_text = agent.trajectory_text if agent is not None else ""
             raw_steps = agent.raw_steps if agent is not None else []
+            agent_timings = agent.timings if agent is not None else {
+                "prompt_builds": [],
+                "llm_calls": [],
+                "tool_calls": [],
+            }
+            agent_timing_totals = {
+                "prompt_build_seconds": round(
+                    sum(
+                        call["duration_seconds"]
+                        for call in agent_timings["prompt_builds"]
+                    ),
+                    4,
+                ),
+                "llm_call_seconds": round(
+                    sum(
+                        call["duration_seconds"]
+                        for call in agent_timings["llm_calls"]
+                    ),
+                    4,
+                ),
+                "tool_call_seconds": round(
+                    sum(
+                        call["duration_seconds"]
+                        for call in agent_timings["tool_calls"]
+                    ),
+                    4,
+                ),
+            }
             variables = agent.variables if agent is not None else {}
+            entry["agent_timings"] = agent_timings
+            entry["agent_timing_totals"] = agent_timing_totals
             trajectory_text_path.write_text(trajectory_text, encoding="utf-8")
             assets_dir = log_dir / "debug_assets"
             serialized_variables = json_safe(variables, assets_dir, "variables")
@@ -643,6 +691,7 @@ def run_one(
                 ),
                 encoding="utf-8",
             )
+            _write_raw_agent_trajectory(raw_trajectory_path, raw_steps, assets_dir)
             raw_payload = {
                 "benchmark": benchmark,
                 "sample_id": sample_id,
@@ -654,8 +703,13 @@ def run_one(
                 "status": entry["status"],
                 "error": entry.get("error"),
                 "traceback": entry.get("traceback"),
+                "elapsed_seconds": entry["elapsed_seconds"],
+                "agent_elapsed_seconds": entry.get("agent_elapsed_seconds"),
                 "agent_trajectory": trajectory,
                 "agent_raw_steps": raw_steps,
+                "agent_timings": agent_timings,
+                "agent_timing_totals": agent_timing_totals,
+                "raw_trajectory_path": str(raw_trajectory_path),
                 "agent_variables": serialized_variables,
                 "turn_result_raw": result.raw if result is not None else None,
                 "message": result.message.text if result is not None else None,
