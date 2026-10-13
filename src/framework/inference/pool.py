@@ -19,6 +19,8 @@ from .utils import get_device, torch_dtype
 if TYPE_CHECKING:
     from diffusers import Flux2KleinPipeline
     from transformers import (
+        GroundingDinoForObjectDetection,
+        GroundingDinoProcessor,
         Sam3Model,
         Sam3Processor,
         Sam3TrackerModel,
@@ -36,17 +38,27 @@ class Sam3Pipelines:
     tracker_processor: Sam3TrackerProcessor
 
 
+@dataclass(frozen=True)
+class GroundingDinoPipelines:
+    model: GroundingDinoForObjectDetection
+    processor: GroundingDinoProcessor
+
+
 class ModelPool:
-    """One shared instance with all model pipelines loaded during initialization.
+    """One shared instance for model pipelines and their configurations.
 
     Public attributes:
         flux2_klein_pipeline          - regular image editing
         sam3_pipelines                - text and point/box segmentation
+        grounding_dino_pipelines      - phrase grounding for region segmentation
         object_clear_pipeline         - object removal
+
+    Grounding DINO loads on first use; the other pipelines are initialized eagerly.
     """
 
     FLUX2_KLEIN_MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
     SAM3_MODEL_ID = "facebook/sam3"
+    GROUNDING_DINO_MODEL_ID = "IDEA-Research/grounding-dino-tiny"
     OBJECT_CLEAR_MODEL_ID = "jixin0101/ObjectClear"
 
     def __init__(self, config: InferenceConfig | None = None) -> None:
@@ -57,6 +69,7 @@ class ModelPool:
             self.flux2_klein_pipeline,
             self.sam3_pipelines,
             self.object_clear_pipeline,
+            self.grounding_dino_pipelines,
         )
 
     @cached_property
@@ -95,6 +108,24 @@ class ModelPool:
             .to(self.device)
             .eval(),
             tracker_processor=Sam3TrackerProcessor.from_pretrained(self.SAM3_MODEL_ID),
+        )
+
+    @cached_property
+    def grounding_dino_pipelines(self) -> GroundingDinoPipelines:
+        from transformers import (
+            AutoModelForZeroShotObjectDetection,
+            AutoProcessor,
+        )
+
+        dtype = torch_dtype(self.device)
+        return GroundingDinoPipelines(
+            model=AutoModelForZeroShotObjectDetection.from_pretrained(
+                self.GROUNDING_DINO_MODEL_ID,
+                torch_dtype=dtype,
+            )
+            .to(self.device)
+            .eval(),
+            processor=AutoProcessor.from_pretrained(self.GROUNDING_DINO_MODEL_ID),
         )
 
     @cached_property

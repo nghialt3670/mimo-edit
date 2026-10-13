@@ -2,6 +2,7 @@
 
 from .core import Agent, Message, RunResult, TurnResult, local_executor
 from .tools import (
+    GroundingDinoInferenceConfig,
     InferenceConfig,
     KleinInferenceConfig,
     ModelPool,
@@ -16,6 +17,7 @@ __all__ = [
     "Message",
     "ModelPool",
     "InferenceConfig",
+    "GroundingDinoInferenceConfig",
     "KleinInferenceConfig",
     "ObjectClearInferenceConfig",
     "Sam3InferenceConfig",

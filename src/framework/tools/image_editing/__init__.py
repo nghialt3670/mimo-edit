@@ -10,6 +10,7 @@ from . import (
     replace_object,
     rotate_object,
     scale_object,
+    segment_region,
     segment_object,
     shift_object,
 )

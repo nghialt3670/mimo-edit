@@ -36,6 +36,22 @@ class Sam3InferenceConfig:
 
 
 @dataclass(frozen=True)
+class GroundingDinoInferenceConfig:
+    """Inference settings for the fixed Grounding DINO detector."""
+
+    box_threshold: float = 0.35
+    text_threshold: float = 0.25
+
+    def __post_init__(self) -> None:
+        validate_number_range(
+            "grounding_dino.box_threshold", self.box_threshold, 0, 1
+        )
+        validate_number_range(
+            "grounding_dino.text_threshold", self.text_threshold, 0, 1
+        )
+
+
+@dataclass(frozen=True)
 class ObjectClearInferenceConfig:
     """Inference settings for the fixed ObjectClear removal model."""
 
@@ -55,10 +71,13 @@ class ObjectClearInferenceConfig:
 
 @dataclass(frozen=True)
 class InferenceConfig:
-    """Inference settings for the fixed Klein, SAM 3, and ObjectClear backbones."""
+    """Inference settings for the fixed image-editing and segmentation backbones."""
 
     klein: KleinInferenceConfig = field(default_factory=KleinInferenceConfig)
     sam3: Sam3InferenceConfig = field(default_factory=Sam3InferenceConfig)
+    grounding_dino: GroundingDinoInferenceConfig = field(
+        default_factory=GroundingDinoInferenceConfig
+    )
     object_clear: ObjectClearInferenceConfig = field(
         default_factory=ObjectClearInferenceConfig
     )
@@ -68,6 +87,7 @@ class InferenceConfig:
         for name, value, config_type in (
             ("klein", self.klein, KleinInferenceConfig),
             ("sam3", self.sam3, Sam3InferenceConfig),
+            ("grounding_dino", self.grounding_dino, GroundingDinoInferenceConfig),
             ("object_clear", self.object_clear, ObjectClearInferenceConfig),
         ):
             if not isinstance(value, config_type):

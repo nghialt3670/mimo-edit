@@ -3,6 +3,7 @@ from __future__ import annotations
 from smolagents import Tool
 
 from framework.inference import (
+    GroundingDinoInferenceConfig,
     InferenceConfig,
     KleinInferenceConfig,
     ModelPool,
@@ -33,6 +34,7 @@ __all__ = [
     "ToolContext",
     "ModelPool",
     "InferenceConfig",
+    "GroundingDinoInferenceConfig",
     "KleinInferenceConfig",
     "ObjectClearInferenceConfig",
     "Sam3InferenceConfig",
