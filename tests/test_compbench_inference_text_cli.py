@@ -16,6 +16,7 @@ class CompBenchTextInferenceCliTests(unittest.TestCase):
         self.assertIsNone(args.annotations)
         self.assertIsNone(args.annotation_run)
         self.assertIsNone(args.limit)
+        self.assertIsNone(args.samples_file)
         self.assertEqual(args.start_index, 0)
         self.assertFalse(args.resume)
         self.assertIsNone(args.run)
@@ -41,11 +42,37 @@ class CompBenchTextInferenceCliTests(unittest.TestCase):
             args = _parse_args()
 
         self.assertEqual(args.limit, 3)
+        self.assertIsNone(args.samples_file)
         self.assertEqual(args.start_index, 2)
         self.assertTrue(args.resume)
         self.assertEqual(args.run, "run_20261012_012511_868075")
         self.assertTrue(args.rerun_completed)
         self.assertTrue(args.require_cuda)
+
+    def test_accepts_samples_file(self):
+        with patch.object(
+            sys,
+            "argv",
+            ["compbench_inference_text", "--samples-file", "retry.txt"],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.samples_file, Path("retry.txt"))
+
+    def test_rejects_samples_file_with_limit(self):
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "compbench_inference_text",
+                "--samples-file",
+                "retry.txt",
+                "--limit",
+                "3",
+            ],
+        ):
+            with self.assertRaises(SystemExit):
+                _parse_args()
 
     def test_rejects_run_without_resume(self):
         with patch.object(

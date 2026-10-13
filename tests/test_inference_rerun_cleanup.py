@@ -10,6 +10,49 @@ from evaluation.common import run_benchmark
 
 
 class InferenceRerunCleanupTests(unittest.TestCase):
+    def test_resume_maps_sparse_dataset_row_index_to_annotation_position(self) -> None:
+        records = [
+            {
+                "sample_id": "sample:2761",
+                "metadata": {"row_index": 2761},
+            }
+        ]
+        with tempfile.TemporaryDirectory() as temp_dir:
+            run_dir = Path(temp_dir)
+            results_path = run_dir / "results" / "results.jsonl"
+            results_path.parent.mkdir(parents=True)
+            results_path.write_text(
+                json.dumps(
+                    {
+                        "benchmark": "compbench",
+                        "prompt_mode": "mixed",
+                        "sample_id": "sample:2761",
+                        "annotation_index": 2761,
+                        "status": "completed",
+                    }
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            results = run_benchmark(
+                records,
+                [0],
+                benchmark="compbench",
+                prompt_mode="mixed",
+                output_dir=run_dir,
+                image_loader=object(),
+                model=object(),
+                tools=[],
+                resume=True,
+            )
+
+            self.assertEqual(len(results), 1)
+            self.assertEqual(results[0]["sample_id"], "sample:2761")
+            self.assertEqual(results[0]["annotation_index"], 0)
+            saved_result = json.loads(results_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved_result["annotation_index"], 0)
+
     def test_rerun_clears_only_selected_sample_logs_and_images(self) -> None:
         records = [{"sample_id": "sample:0"}, {"sample_id": "sample:1"}]
         with tempfile.TemporaryDirectory() as temp_dir:

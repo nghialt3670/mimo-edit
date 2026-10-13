@@ -209,24 +209,22 @@ def build_agent_context(
         "Use image_0 as the source image. Follow the user instruction and return the "
         "final edited image.",
         (
-            "This is text-only reference mode. For each existing entity, use "
-            "segment_object with a natural-language text description from the "
-            "instruction or reference description. Do not use annotation boxes, "
-            "points, scribbles, masks, or crops as model inputs. For a spatial "
-            "destination, infer placement from the image and instruction rather "
-            "than using annotation geometry."
+            "For each referenced existing entity, use segment_object with its "
+            "natural-language description. No visual selector is supplied for "
+            "these references; do not assume annotation boxes, points, scribbles, "
+            "masks, or crops are available. For a spatial destination without a "
+            "supplied box, infer placement from the image and instruction."
             if prompt_mode == "text"
             else (
-                "The user instruction contains visual placeholders such as "
-                "<point_0>, <box_1>, or <scribble_2>. Each placeholder names the "
-                "exact Python variable bound in the observation; use that variable "
-                "directly and do not infer a variable from placeholder order. For "
-                "each reference to an existing entity, call segment_object with "
-                "its single supplied selector to create a mask before editing. A "
-                "spatial destination is not an existing entity: use its supplied "
-                "box directly with add_object, without calling segment_object. "
-                "Never use annotation masks or crops. Do not combine selector "
-                "types for one reference."
+                "When the instruction contains a visual placeholder such as "
+                "<point_0>, <box_1>, or <scribble_2>, use the exactly matching "
+                "variable bound in the observation; do not infer a variable from "
+                "placeholder order. For each reference to an existing entity, "
+                "call segment_object with its single supplied selector to create "
+                "a mask before editing. A spatial destination is not an existing "
+                "entity: use its supplied box directly with add_object, without "
+                "calling segment_object. Never use annotation masks or crops. Do "
+                "not combine selector types for one reference."
             )
         )
         + " Apply edits to each required object in sequence and preserve unrelated "
@@ -241,9 +239,16 @@ def build_agent_context(
         "unmentioned details. Use other registered tools when they better match the "
         "requested operation.",
     ]
-    if prompt_mode == "mixed" and needs_spatial_anchor_box(
-        sample.get("instruction") or ""
-    ):
+    spatial_anchor_needed = needs_spatial_anchor_box(sample.get("instruction") or "")
+    if spatial_anchor_needed:
+        lines.append(
+            "For relative placement without a supplied destination box, use the "
+            "anchor's full bounding box and image dimensions to calculate an "
+            "approximate destination [x1, y1, x2, y2] in pixels; clamp it to the "
+            "image and pass it as add_object(box=...). When no selector is "
+            "available for the anchor, segment it and use its mask bounds."
+        )
+    if prompt_mode == "mixed" and spatial_anchor_needed:
         lines.append(
             "This request places a new object relative to an existing reference. "
             "Use the reference's supplied box as the full-object anchor when "
@@ -780,13 +785,30 @@ def run_benchmark(
             raise FileNotFoundError(
                 f"Cannot resume; inference results not found: {results_path}"
             )
+        positions_by_sample_id: dict[str, int] = {}
+        for position, record in enumerate(records):
+            sample_id = record.get("sample_id") or f"annotation_{position}"
+            if sample_id in positions_by_sample_id:
+                raise ValueError(f"Duplicate sample_id in annotations: {sample_id!r}")
+            positions_by_sample_id[sample_id] = position
+
         for previous_result in read_jsonl(results_path):
-            annotation_index = previous_result.get("annotation_index")
-            if not isinstance(annotation_index, int) or not (
-                0 <= annotation_index < len(records)
-            ):
+            stored_index = previous_result.get("annotation_index")
+            if not isinstance(stored_index, int) or isinstance(stored_index, bool):
                 raise ValueError(
-                    f"Invalid annotation_index in {results_path}: {annotation_index!r}"
+                    f"Invalid annotation_index in {results_path}: {stored_index!r}"
+                )
+            sample_id = previous_result.get("sample_id")
+            if isinstance(sample_id, str):
+                annotation_index = positions_by_sample_id.get(sample_id)
+            elif 0 <= stored_index < len(records):
+                annotation_index = stored_index
+            else:
+                annotation_index = None
+            if annotation_index is None:
+                raise ValueError(
+                    f"Cannot match result annotation_index {stored_index!r} "
+                    f"and sample_id {sample_id!r} to the annotation file."
                 )
             if previous_result.get("benchmark") != benchmark:
                 raise ValueError(
@@ -801,11 +823,26 @@ def run_benchmark(
             expected_sample_id = records[annotation_index].get("sample_id") or (
                 f"annotation_{annotation_index}"
             )
-            if previous_result.get("sample_id") != expected_sample_id:
+            metadata = records[annotation_index].get("metadata")
+            row_index = metadata.get("row_index") if isinstance(metadata, dict) else None
+            accepted_indices = {annotation_index}
+            if isinstance(row_index, int) and not isinstance(row_index, bool):
+                accepted_indices.add(row_index)
+            if (
+                previous_result.get("sample_id") != expected_sample_id
+                or stored_index not in accepted_indices
+            ):
                 raise ValueError(
-                    f"Cannot resume annotation {annotation_index}: expected sample "
-                    f"{expected_sample_id!r}, found "
+                    f"Cannot resume result at annotation index {stored_index}: "
+                    f"expected sample {expected_sample_id!r} at position "
+                    f"{annotation_index}, found "
                     f"{previous_result.get('sample_id')!r}."
+                )
+            previous_result["annotation_index"] = annotation_index
+            if annotation_index in results_by_index:
+                raise ValueError(
+                    f"Duplicate result for annotation {annotation_index} in "
+                    f"{results_path}."
                 )
             results_by_index[annotation_index] = previous_result
 

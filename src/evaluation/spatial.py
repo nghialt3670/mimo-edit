@@ -8,8 +8,10 @@ def needs_spatial_anchor_box(instruction: str) -> bool:
     return bool(
         re.search(r"\b(?:add|place|put|insert|position)\b", instruction, re.IGNORECASE)
         and re.search(
-            r"\b(?:beside|next to|near|behind|in front of|to the (?:left|right) of|"
-            r"(?:front|rear|back) of)\b",
+            r"\b(?:above|over|below|beneath|under|beside|next to|near|behind|"
+            r"in front of|to the (?:left|right) of|(?:left|right) of|"
+            r"(?:upper|lower|top|bottom)[ -](?:left|right)|"
+            r"(?:top|bottom) of|(?:front|rear|back) of)\b",
             instruction,
             re.IGNORECASE,
         )

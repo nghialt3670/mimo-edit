@@ -16,6 +16,8 @@ class CompBenchInferenceCliTests(unittest.TestCase):
         self.assertIsNone(args.annotations)
         self.assertIsNone(args.annotation_run)
         self.assertIsNone(args.limit)
+        self.assertIsNone(args.tasks)
+        self.assertIsNone(args.samples_file)
         self.assertEqual(args.start_index, 0)
         self.assertFalse(args.resume)
         self.assertIsNone(args.run)
@@ -29,6 +31,9 @@ class CompBenchInferenceCliTests(unittest.TestCase):
                 "compbench_inference_mixed",
                 "--limit",
                 "3",
+                "--tasks",
+                "add",
+                "multi_object_remove",
                 "--start-index",
                 "2",
                 "--resume",
@@ -41,6 +46,8 @@ class CompBenchInferenceCliTests(unittest.TestCase):
             args = _parse_args()
 
         self.assertEqual(args.limit, 3)
+        self.assertEqual(args.tasks, ["add", "multi_object_remove"])
+        self.assertIsNone(args.samples_file)
         self.assertEqual(args.start_index, 2)
         self.assertTrue(args.resume)
         self.assertEqual(args.run, "run_20261012_012511_868075")
@@ -67,6 +74,46 @@ class CompBenchInferenceCliTests(unittest.TestCase):
 
     def test_rejects_non_positive_limit(self):
         with patch.object(sys, "argv", ["compbench_inference_mixed", "--limit", "0"]):
+            with self.assertRaises(SystemExit):
+                _parse_args()
+
+    def test_accepts_samples_file(self):
+        with patch.object(
+            sys,
+            "argv",
+            ["compbench_inference_mixed", "--samples-file", "retry.txt"],
+        ):
+            args = _parse_args()
+
+        self.assertEqual(args.samples_file, Path("retry.txt"))
+
+    def test_rejects_samples_file_with_tasks(self):
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "compbench_inference_mixed",
+                "--samples-file",
+                "retry.txt",
+                "--tasks",
+                "add",
+            ],
+        ):
+            with self.assertRaises(SystemExit):
+                _parse_args()
+
+    def test_rejects_samples_file_with_limit(self):
+        with patch.object(
+            sys,
+            "argv",
+            [
+                "compbench_inference_mixed",
+                "--samples-file",
+                "retry.txt",
+                "--limit",
+                "3",
+            ],
+        ):
             with self.assertRaises(SystemExit):
                 _parse_args()
 

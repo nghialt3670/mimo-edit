@@ -10,6 +10,7 @@ from evaluation.common import (
     load_sample,
     select_reference_prompts,
 )
+from evaluation.spatial import needs_spatial_anchor_box
 
 
 class InferenceVisualPromptMappingTests(unittest.TestCase):
@@ -93,6 +94,37 @@ class InferenceVisualPromptMappingTests(unittest.TestCase):
 
         self.assertIn("below the mountain", context)
 
+    def test_spatial_placement_guides_manual_destination_box_calculation(self):
+        sample = {
+            "instruction": "Add a bird above <v1>.",
+            "references": [
+                {
+                    "token": "<v1>",
+                    "display_token": "<box_0>",
+                    "span": "the tree",
+                    "selected_prompt": {"type": "box", "variable": "box_0"},
+                    "spatial_destination": False,
+                }
+            ],
+        }
+
+        context = build_agent_context(sample)
+
+        self.assertTrue(needs_spatial_anchor_box(sample["instruction"]))
+        self.assertIn("calculate an approximate destination", context)
+        self.assertIn("add_object(box=...)", context)
+        self.assertIn("full-object anchor", context)
+
+    def test_detects_diagonal_and_cardinal_relative_placement(self):
+        for instruction in (
+            "Place a lamp to the right of the sofa.",
+            "Add a plant below the window.",
+            "Put a picture in the top-left of the wall.",
+            "Position a chair upper right of the desk.",
+        ):
+            with self.subTest(instruction=instruction):
+                self.assertTrue(needs_spatial_anchor_box(instruction))
+
     def test_text_mode_keeps_instruction_without_visual_prompt_tokens(self):
         sample = {
             "sample_id": "easy:003",
@@ -113,6 +145,48 @@ class InferenceVisualPromptMappingTests(unittest.TestCase):
 
         self.assertEqual(sample["instruction"], "Remove the surfboard.")
         self.assertIsNone(sample["references"][0]["selected_prompt"])
+
+    def test_agent_context_does_not_expose_inference_prompt_family(self):
+        text_context = build_agent_context(
+            {
+                "instruction": "Remove the surfboard.",
+                "references": [
+                    {
+                        "token": "<v1>",
+                        "span": "the surfboard",
+                        "selected_prompt": None,
+                    }
+                ],
+            },
+            prompt_mode="text",
+        )
+        visual_context = build_agent_context(
+            {
+                "instruction": "Remove <point_0>.",
+                "references": [
+                    {
+                        "token": "<v1>",
+                        "display_token": "<point_0>",
+                        "span": "the surfboard",
+                        "selected_prompt": {
+                            "type": "point",
+                            "variable": "point_0",
+                        },
+                        "spatial_destination": False,
+                    }
+                ],
+            },
+            prompt_mode="mixed",
+        )
+
+        for context in (text_context, visual_context):
+            with self.subTest(context=context):
+                lowered_context = context.lower()
+                self.assertNotIn("text mode", lowered_context)
+                self.assertNotIn("mixed mode", lowered_context)
+                self.assertNotIn("text-only", lowered_context)
+        self.assertIn("No visual selector is supplied", text_context)
+        self.assertIn("exactly matching variable", visual_context)
 
 
 if __name__ == "__main__":

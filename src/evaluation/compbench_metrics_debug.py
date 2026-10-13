@@ -1,5 +1,6 @@
 import base64
 import html
+import json
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -16,9 +17,14 @@ def _resolve_artifact(
 ) -> Path | None:
     if isinstance(sample_output_path, str) and sample_output_path:
         output_path = Path(sample_output_path).expanduser()
-        if field == "trajectory_text_path":
+        log_files = {
+            "trajectory_text_path": "trajectory.txt",
+            "raw_trajectory_path": "agent_raw_trajectory.json",
+            "raw_path": "raw.json",
+        }
+        if field in log_files:
             sample_dir = output_path.name.removesuffix("_output.png")
-            derived_path = output_dir / "logs" / sample_dir / "trajectory.txt"
+            derived_path = output_dir / "logs" / sample_dir / log_files[field]
         else:
             suffixes = {
                 "source_path": "_source.png",
@@ -42,13 +48,47 @@ def _resolve_artifact(
         recorded_path = Path(value).expanduser()
         if recorded_path.is_file():
             return recorded_path
-        if field == "trajectory_text_path":
+        if field in {"trajectory_text_path", "raw_trajectory_path", "raw_path"}:
             local_path = output_dir / "logs" / recorded_path.parent.name / recorded_path.name
         else:
             local_path = output_dir / "results" / "images" / recorded_path.name
         if local_path.is_file():
             return local_path
     return None
+
+
+def _raw_prompt_details(path: Path | None) -> str:
+    if path is None:
+        return "<p><i>Raw model prompts are not available for this run.</i></p>"
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_steps = payload if isinstance(payload, list) else payload.get("agent_raw_steps", [])
+    prompt_steps = [
+        step
+        for step in raw_steps
+        if isinstance(step, dict)
+        and isinstance(step.get("model_input_messages"), list)
+    ]
+    if not prompt_steps:
+        return "<p><i>No raw model input messages were saved for this run.</i></p>"
+
+    sections = []
+    for call_index, step in enumerate(prompt_steps, start=1):
+        messages = step["model_input_messages"]
+        step_number = step.get("step_number", call_index)
+        prompt_json = json.dumps(messages, ensure_ascii=False, indent=2, default=str)
+        sections.append(
+            f"<details><summary>Model call {call_index} (agent step {step_number}; "
+            f"{len(messages)} messages)</summary>"
+            '<pre style="white-space:pre-wrap;max-height:600px;overflow:auto">'
+            f"{html.escape(prompt_json)}</pre></details>"
+        )
+    return (
+        f"<details><summary>Raw LLM prompts ({len(prompt_steps)} model call(s))"
+        "</summary>"
+        + "".join(sections)
+        + "</details>"
+    )
 
 
 def _image_card(title: str, path: Path | None) -> str:
@@ -128,6 +168,10 @@ def display_worst_sample_details(
             f"<pre style=\"white-space:pre-wrap;max-height:600px;overflow:auto\">"
             f"{html.escape(text)}</pre></details>"
         )
+    raw_path = _resolve_artifact(
+        result, "raw_trajectory_path", output_dir, sample_output_path
+    ) or _resolve_artifact(result, "raw_path", output_dir, sample_output_path)
+    raw_prompts = _raw_prompt_details(raw_path)
     task = html.escape(str(row.get("task") or ""))
     escaped_id = html.escape(str(sample_id))
     original = html.escape(str(annotation.get("original_instruction") or ""))
@@ -141,6 +185,6 @@ def display_worst_sample_details(
             f"<p><b>Mixed instruction:</b> {mixed}</p>"
             f"<b>Annotation references:</b>{_annotation_text(annotation)}"
             f'<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px">{image_cards}</div>'
-            f"{trajectory}</section>"
+            f"{trajectory}{raw_prompts}</section>"
         )
     )
