@@ -486,10 +486,21 @@ def json_safe(
                 "__type__": type(value).__name__,
                 "data": json_safe(value.to_dict(), asset_dir, prefix, seen),
             }
-        if hasattr(value, "__dict__"):
+        try:
+            attributes = vars(value)
+        except TypeError:
+            pass
+        except ModuleNotFoundError as exc:
+            if exc.name != "_gdbm":
+                raise
             return {
                 "__type__": type(value).__name__,
-                "data": json_safe(vars(value), asset_dir, prefix, seen),
+                "__repr__": "Object attributes unavailable because _gdbm is missing",
+            }
+        else:
+            return {
+                "__type__": type(value).__name__,
+                "data": json_safe(attributes, asset_dir, prefix, seen),
             }
         return {"__type__": type(value).__name__, "__repr__": repr(value)}
     finally:

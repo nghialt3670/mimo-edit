@@ -9,7 +9,7 @@ from evaluation.compbench_metrics_debug import (
     _raw_prompt_details,
     _resolve_artifact,
 )
-from evaluation.common import _write_raw_agent_trajectory
+from evaluation.common import _write_raw_agent_trajectory, json_safe
 
 
 class CompBenchMetricsDebugTests(unittest.TestCase):
@@ -95,6 +95,46 @@ class CompBenchMetricsDebugTests(unittest.TestCase):
             saved_steps = json.loads(raw_path.read_text(encoding="utf-8"))
 
         self.assertEqual(saved_steps, raw_steps)
+
+    def test_raw_agent_trajectory_handles_missing_gdbm_while_serializing(self):
+        class GdbmDependent:
+            def __getattribute__(self, name):
+                if name == "__dict__":
+                    raise ModuleNotFoundError(
+                        "No module named '_gdbm'", name="_gdbm"
+                    )
+                return super().__getattribute__(name)
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            raw_path = root / "agent_raw_trajectory.json"
+            _write_raw_agent_trajectory(
+                raw_path,
+                [{"debug_value": GdbmDependent()}],
+                root / "assets",
+            )
+            saved_steps = json.loads(raw_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            saved_steps[0]["debug_value"],
+            {
+                "__type__": "GdbmDependent",
+                "__repr__": "Object attributes unavailable because _gdbm is missing",
+            },
+        )
+
+    def test_json_safe_does_not_suppress_other_missing_modules(self):
+        class MissingModule:
+            def __getattribute__(self, name):
+                if name == "__dict__":
+                    raise ModuleNotFoundError(
+                        "No module named 'other_module'", name="other_module"
+                    )
+                return super().__getattribute__(name)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ModuleNotFoundError, "other_module"):
+                json_safe(MissingModule(), Path(directory))
 
 
 if __name__ == "__main__":

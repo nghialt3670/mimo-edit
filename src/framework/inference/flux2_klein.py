@@ -55,7 +55,7 @@ def flux2_klein_edit_object(
     prompt: str,
     *,
     mode: Literal["local", "regional", "global"] = "local",
-    padding: float = 0.25,
+    padding: float = 0.2,
 ) -> Image.Image:
     """Edit one masked object and feather the local/regional composite boundary."""
     if not isinstance(image, Image.Image):
