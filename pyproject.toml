@@ -34,6 +34,23 @@ dependencies = [
     "torchaudio>=2.11.0",
     "safetensors>=0.8.0",
     "torchmetrics>=1.9.0",
+    "replicate>=1.0.7",
+    "scikit-image>=0.26.0",
+    "requests>=2.34.2",
+    "filelock>=4.1.0",
+    "ftfy>=6.3.1",
+    "regex>=2026.9.29",
+    "humanize>=4.16.0",
+    "fire>=0.7.1",
+    "clip",
+    "point-e",
+    "albumentations>=2.0.8",
+    "easydict>=1.13",
+    "einops>=0.8.2",
+    "kornia>=0.8.3",
+    "pandas>=3.0.6",
+    "pytorch-msssim>=1.0.0",
+    "tensorboard>=2.21.0",
 ]
 
 [project.optional-dependencies]
@@ -84,3 +101,5 @@ include = ["annotation*", "evaluation*", "framework*", "scripts*", "visualizatio
 
 [tool.uv.sources]
 diffusers = { git = "https://github.com/huggingface/diffusers.git" }
+clip = { git = "https://github.com/openai/CLIP.git" }
+point-e = { git = "https://github.com/openai/point-e.git" }

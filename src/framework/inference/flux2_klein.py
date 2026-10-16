@@ -153,7 +153,7 @@ def _generate_klein_edit(
 
 
 # Shared settings for distilled FLUX.2 Klein 4B.
-PADDING_FRAC = 0.4
+PADDING_FRAC = 0.8
 WORK_SIZE = 1024
 EDGE_BLEND_PX = 12
 
@@ -229,7 +229,7 @@ def flux2_klein_add_object_with_box(
         edited = (
             pipe(
                 image=cropped.resize((ww, wh), Image.Resampling.LANCZOS),
-                prompt=f"Add {prompt} to the center.",
+                prompt=prompt,
                 height=wh,
                 width=ww,
                 num_inference_steps=inference_config.num_inference_steps,

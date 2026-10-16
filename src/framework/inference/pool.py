@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import cached_property
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import torch
 
@@ -45,15 +45,16 @@ class GroundingDinoPipelines:
 
 
 class ModelPool:
-    """One shared instance for model pipelines and their configurations.
+    """Share one cached instance of each model pipeline.
+
+    Pipelines are loaded on first access.
 
     Public attributes:
         flux2_klein_pipeline          - regular image editing
+        mice_pipeline                 - MICE spatially constrained Klein editing
         sam3_pipelines                - text and point/box segmentation
         grounding_dino_pipelines      - phrase grounding for region segmentation
         object_clear_pipeline         - object removal
-
-    Grounding DINO loads on first use; the other pipelines are initialized eagerly.
     """
 
     FLUX2_KLEIN_MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
@@ -65,12 +66,12 @@ class ModelPool:
         seed_random_generators()
         self.config = config if config is not None else InferenceConfig()
         self.device = get_device()
-        self._pipelines = (
-            self.flux2_klein_pipeline,
-            self.sam3_pipelines,
-            self.object_clear_pipeline,
-            self.grounding_dino_pipelines,
-        )
+        # self._pipelines = (
+        #     self.flux2_klein_pipeline,
+        #     self.sam3_pipelines,
+        #     self.object_clear_pipeline,
+        #     self.grounding_dino_pipelines,
+        # )
 
     @cached_property
     def flux2_klein_pipeline(self) -> Flux2KleinPipeline:
@@ -86,6 +87,32 @@ class ModelPool:
         # The 4-step Klein 4B checkpoint is distilled (no classifier-free guidance).
         pipe.register_to_config(is_distilled=True)
         return pipe.to(self.device)
+
+    @cached_property
+    def mice_pipeline(self) -> Any:
+        """Load MICE's *custom* Klein pipeline once, on first use.
+
+        MICE cannot share the ordinary Diffusers Klein pipeline directly because
+        it installs custom attention processors. This loads separate model weights.
+        """
+        from .external.mice_adapter import load_mice_pipeline
+
+        return load_mice_pipeline(
+            model_id=self.FLUX2_KLEIN_MODEL_ID,
+            device=self.device,
+            dtype=torch_dtype(
+                self.device, cuda_dtype=torch.bfloat16, mps_dtype=torch.float32
+            ),
+        )
+
+    @cached_property
+    def pctnet_pipeline(self):
+        from .external.pctnet_harmonization import load_pctnet
+
+        return load_pctnet(
+            device="cpu",
+            variant="CNN",
+        )
 
     @cached_property
     def sam3_pipelines(self) -> Sam3Pipelines:

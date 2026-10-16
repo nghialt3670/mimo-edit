@@ -139,6 +139,59 @@ class HFImageLoader:
         return source_image, target_image
 
 
+class MiraBenchImageLoader:
+    """Load file-based MIRA-Bench images from a local dataset snapshot."""
+
+    _REFERENCE_PREFIXES = (
+        "mira_bench://benchmark/",
+        "hf://ziqiangoodgood/MIRAGE/benchmark/",
+    )
+
+    def __init__(self, image_root: str | Path) -> None:
+        self.image_root = Path(image_root).expanduser().resolve()
+        if not self.image_root.is_dir():
+            raise FileNotFoundError(
+                f"MIRA-Bench image directory not found: {self.image_root}"
+            )
+
+    def load_pair(
+        self, record: dict[str, Any]
+    ) -> tuple[Image.Image, Image.Image | None]:
+        if record.get("target_ref") is not None:
+            raise ValueError("MIRA-Bench annotations must not include target_ref")
+        reference = record.get("source_ref")
+        if not isinstance(reference, str):
+            raise ValueError(f"No source_ref for sample {record.get('sample_id')}")
+        relative_path = next(
+            (
+                reference.removeprefix(prefix)
+                for prefix in self._REFERENCE_PREFIXES
+                if reference.startswith(prefix)
+            ),
+            None,
+        )
+        if not relative_path:
+            raise ValueError(f"Unsupported MIRA-Bench image reference: {reference!r}")
+        image_path = Path(relative_path)
+        if image_path.is_absolute() or ".." in image_path.parts:
+            raise ValueError(
+                f"MIRA-Bench image reference escapes dataset directory: {reference!r}"
+            )
+        resolved_path = (self.image_root / image_path).resolve()
+        if not resolved_path.is_relative_to(self.image_root):
+            raise ValueError(
+                f"MIRA-Bench image reference escapes dataset directory: {reference!r}"
+            )
+        if not resolved_path.is_file():
+            raise FileNotFoundError(
+                f"MIRA-Bench image not found for sample "
+                f"{record.get('sample_id')}: {resolved_path}"
+            )
+        with Image.open(resolved_path) as image:
+            source_image = image.convert("RGB")
+        return source_image, None
+
+
 def _get_instruction(record: dict[str, Any], prompt_mode: PromptMode) -> str | None:
     _validate_prompt_mode(prompt_mode)
     primary_field = (
@@ -152,7 +205,7 @@ def load_sample(
     record: dict[str, Any],
     *,
     benchmark: str,
-    image_loader: HFImageLoader,
+    image_loader: HFImageLoader | MiraBenchImageLoader,
     prompt_mode: PromptMode = "mixed",
 ) -> dict[str, Any]:
     _validate_prompt_mode(prompt_mode)
@@ -262,8 +315,7 @@ def build_agent_context(
         description = ref.get("span")
         description_line = (
             f" refers to {description!r};"
-            if description
-            and (prompt_mode == "text" or ref.get("spatial_destination"))
+            if description and (prompt_mode == "text" or ref.get("spatial_destination"))
             else ""
         )
         if prompt_mode == "text":
@@ -524,7 +576,7 @@ def run_one(
     benchmark: str,
     prompt_mode: PromptMode,
     output_dir: Path,
-    image_loader: HFImageLoader,
+    image_loader: HFImageLoader | MiraBenchImageLoader,
     model: Any,
     tools: list[Any],
     max_steps: int = 16,
@@ -657,11 +709,15 @@ def run_one(
             trajectory = agent.trajectory if agent is not None else []
             trajectory_text = agent.trajectory_text if agent is not None else ""
             raw_steps = agent.raw_steps if agent is not None else []
-            agent_timings = agent.timings if agent is not None else {
-                "prompt_builds": [],
-                "llm_calls": [],
-                "tool_calls": [],
-            }
+            agent_timings = (
+                agent.timings
+                if agent is not None
+                else {
+                    "prompt_builds": [],
+                    "llm_calls": [],
+                    "tool_calls": [],
+                }
+            )
             agent_timing_totals = {
                 "prompt_build_seconds": round(
                     sum(
@@ -672,15 +728,13 @@ def run_one(
                 ),
                 "llm_call_seconds": round(
                     sum(
-                        call["duration_seconds"]
-                        for call in agent_timings["llm_calls"]
+                        call["duration_seconds"] for call in agent_timings["llm_calls"]
                     ),
                     4,
                 ),
                 "tool_call_seconds": round(
                     sum(
-                        call["duration_seconds"]
-                        for call in agent_timings["tool_calls"]
+                        call["duration_seconds"] for call in agent_timings["tool_calls"]
                     ),
                     4,
                 ),
@@ -748,7 +802,9 @@ def run_one(
     return entry
 
 
-def _clear_sample_artifacts(output_dir: Path, record: dict[str, Any], index: int) -> Path:
+def _clear_sample_artifacts(
+    output_dir: Path, record: dict[str, Any], index: int
+) -> Path:
     sample_id = record.get("sample_id") or f"annotation_{index}"
     safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", str(sample_id)).strip("._") or "sample"
     file_stem = f"{index:06d}_{safe_id}"
@@ -772,7 +828,7 @@ def run_benchmark(
     benchmark: str,
     prompt_mode: PromptMode = "mixed",
     output_dir: Path,
-    image_loader: HFImageLoader,
+    image_loader: HFImageLoader | MiraBenchImageLoader,
     model: Any,
     tools: list[Any],
     resume: bool = False,
@@ -835,7 +891,9 @@ def run_benchmark(
                 f"annotation_{annotation_index}"
             )
             metadata = records[annotation_index].get("metadata")
-            row_index = metadata.get("row_index") if isinstance(metadata, dict) else None
+            row_index = (
+                metadata.get("row_index") if isinstance(metadata, dict) else None
+            )
             accepted_indices = {annotation_index}
             if isinstance(row_index, int) and not isinstance(row_index, bool):
                 accepted_indices.add(row_index)

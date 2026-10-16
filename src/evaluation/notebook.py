@@ -9,7 +9,7 @@ from typing import Any, Literal
 from framework.utils.project import load_project_environment
 from framework.utils.randomness import seed_random_generators
 
-from .common import HFImageLoader, read_jsonl
+from .common import HFImageLoader, MiraBenchImageLoader, read_jsonl
 
 PromptMode = Literal["text", "mixed"]
 
@@ -26,6 +26,12 @@ _BENCHMARKS = {
         "refedit_bench_mixed.jsonl",
         "MMEDIT_REFEDIT_BENCH_OUTPUT_DIR",
     ),
+    "mira_bench": (
+        "MMEDIT_MIRA_BENCH_ANNOTATIONS",
+        "MMEDIT_MIRA_BENCH_ANNOTATION_RUN",
+        "mira_bench_mixed.jsonl",
+        "MMEDIT_MIRA_BENCH_OUTPUT_DIR",
+    ),
 }
 
 
@@ -35,7 +41,7 @@ class BenchmarkContext:
     annotation_file: Path
     output_dir: Path
     records: list[dict[str, Any]]
-    image_loader: HFImageLoader
+    image_loader: HFImageLoader | MiraBenchImageLoader
 
 
 def resolve_annotation_file(
@@ -116,13 +122,40 @@ def load_benchmark(
     except KeyError as exc:
         raise ValueError(f"Unsupported benchmark: {benchmark!r}") from exc
 
-    annotation_file = resolve_annotation_file(
-        project_root=project_root,
-        benchmark=benchmark,
-        annotation_override_env=annotation_env,
-        run_selection_env=run_env,
-        filename=filename,
-    )
+    try:
+        annotation_file = resolve_annotation_file(
+            project_root=project_root,
+            benchmark=benchmark,
+            annotation_override_env=annotation_env,
+            run_selection_env=run_env,
+            filename=filename,
+        )
+    except FileNotFoundError:
+        if (
+            benchmark != "mira_bench"
+            or os.environ.get(annotation_env)
+            or os.environ.get("ANNOTATE_OUT")
+        ):
+            raise
+        legacy_root = project_root / ".out" / "annotation" / "mirage"
+        selected_run = os.environ.get(run_env) or "latest"
+        if selected_run == "latest":
+            legacy_runs = sorted(
+                path
+                for path in legacy_root.glob("run_*")
+                if path.is_dir() and (path / "mirage_mixed.jsonl").is_file()
+            )
+            if legacy_runs:
+                annotation_file = legacy_runs[-1] / "mirage_mixed.jsonl"
+            elif (legacy_root / "mirage_mixed.jsonl").is_file():
+                annotation_file = legacy_root / "mirage_mixed.jsonl"
+            else:
+                raise
+        else:
+            legacy_file = legacy_root / selected_run / "mirage_mixed.jsonl"
+            if not legacy_file.is_file():
+                raise
+            annotation_file = legacy_file
     output_dir = (
         Path(
             os.environ.get(output_env)
@@ -140,7 +173,14 @@ def load_benchmark(
         annotation_file=annotation_file,
         output_dir=output_dir,
         records=records,
-        image_loader=HFImageLoader(),
+        image_loader=(
+            MiraBenchImageLoader(
+                os.environ.get("MIRA_BENCH_IMAGE_ROOT")
+                or project_root / ".cache" / "mira_bench" / "benchmark"
+            )
+            if benchmark == "mira_bench"
+            else HFImageLoader()
+        ),
     )
 
 

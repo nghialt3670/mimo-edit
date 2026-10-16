@@ -3,8 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
-import sys
 from pathlib import Path
 from typing import Any, Literal
 
@@ -17,6 +15,7 @@ from evaluation.metrics import (
     summarize_viescore_scores,
 )
 from evaluation.notebook import resolve_run_directory
+from evaluation.viescore import load_viescore_scorer
 
 
 def _safe_sample_id(sample_id: Any) -> str:
@@ -94,37 +93,6 @@ def collect_saved_outputs(
     return [outputs[index] for index in sorted(outputs)]
 
 
-def _load_viescore(viescore_root: Path, key_path: Path) -> Any:
-    if not (viescore_root / "viescore" / "__init__.py").is_file():
-        raise FileNotFoundError(
-            f"VIESCORE_ROOT must contain viescore/__init__.py: {viescore_root}"
-        )
-    if not key_path.is_file():
-        raise FileNotFoundError(
-            f"VIESCORE_KEY_PATH must point to a file containing the OpenAI API key: {key_path}"
-        )
-    for import_path in (viescore_root, viescore_root / "viescore"):
-        import_path_text = str(import_path.resolve())
-        if import_path_text not in sys.path:
-            sys.path.insert(0, import_path_text)
-    try:
-        from viescore import VIEScore
-    except ModuleNotFoundError as exc:
-        raise ModuleNotFoundError(
-            "Could not import VIEScore. Install its GEdit-Bench dependencies "
-            "(including regex and requests) in this Python environment."
-        ) from exc
-
-    scorer = VIEScore(backbone="gpt4o", task="tie", key_path=str(key_path))
-    if not hasattr(scorer.model, "model_name"):
-        raise RuntimeError(
-            "This VIEScore version does not expose its API model name; "
-            "cannot guarantee GPT-4o evaluation."
-        )
-    scorer.model.model_name = "gpt-4o"
-    return scorer
-
-
 def evaluate_saved_refedit_bench_outputs(
     records: list[dict[str, Any]],
     *,
@@ -161,7 +129,7 @@ def evaluate_saved_refedit_bench_outputs(
             raise EnvironmentError(
                 "Set VIESCORE_KEY_PATH to the local OpenAI API key file."
             )
-        scorer = _load_viescore(viescore_root, key_path)
+        scorer = load_viescore_scorer(viescore_root, key_path)
 
     metric_path = output_dir / "metrics" / "modified_viescore.jsonl"
     cached_scores: dict[tuple[Any, ...], dict[str, Any]] = {}

@@ -195,8 +195,7 @@ def _normalize_add_mask_spans(
                 if first_span[0] <= second_span[0] and second_span[1] <= first_span[1]:
                     longer_index, shorter_index = first_index, second_index
                 elif (
-                    second_span[0] <= first_span[0]
-                    and first_span[1] <= second_span[1]
+                    second_span[0] <= first_span[0] and first_span[1] <= second_span[1]
                 ):
                     longer_index, shorter_index = second_index, first_index
 
@@ -318,6 +317,32 @@ def _disambiguate_masked_spans(
             return entries
 
 
+def _assign_repeated_masked_occurrences(
+    text: str,
+    entries: list[tuple[ParsedEntity, Image.Image, Region]],
+) -> list[tuple[ParsedEntity, Image.Image, Region]]:
+    indices_by_span: dict[str, list[int]] = {}
+    for index, (entity, _, _) in enumerate(entries):
+        indices_by_span.setdefault(entity.span, []).append(index)
+
+    for span, indices in indices_by_span.items():
+        if len(indices) < 2 or any(
+            entries[index][0].occurrence != 0 for index in indices
+        ):
+            continue
+        matches = list(re.finditer(re.escape(span), text))
+        if len(matches) < len(indices):
+            continue
+        for occurrence, index in enumerate(indices):
+            entity, mask, region = entries[index]
+            entries[index] = (
+                entity.model_copy(update={"occurrence": occurrence}),
+                mask,
+                region,
+            )
+    return entries
+
+
 def replace_spans(
     text: str,
     located: list[tuple[int, int, ParsedEntity]],
@@ -336,7 +361,9 @@ def replace_spans(
             needs_destination_preposition = not replacements
             if not duplicate_entity.span:
                 replacement = (
-                    f" at {replacement}" if needs_destination_preposition else replacement
+                    f" at {replacement}"
+                    if needs_destination_preposition
+                    else replacement
                 )
             elif spatial_destination and LEADING_SPATIAL_PREPOSITION_RE.match(
                 duplicate_entity.span
@@ -400,7 +427,11 @@ class Annotator:
 
     def annotate(self, sample: Sample) -> AnnotationRecord:
         parser_instruction = sample.parser_instruction or sample.instruction
+        mira_bench_reference_masks = (
+            dict(sample.reference_masks) if sample.benchmark == "MIRA-Bench" else {}
+        )
         sample.reference_masks.clear()
+        mira_bench_reference_only = sample.benchmark == "MIRA-Bench"
         masked_reference_only = sample.benchmark == "refedit_bench"
         multi_object_add = (
             sample.benchmark == "CompBench"
@@ -541,6 +572,89 @@ class Annotator:
                 entities.append(entity)
             mask_guidance_used = True
             mask_guidance_reasons.append("compbench_multi_object_add_mask_regions")
+        elif mira_bench_reference_only:
+            if any(
+                f"e{index}" not in mira_bench_reference_masks for index in range(1, 6)
+            ):
+                raise AnnotationError("mira_bench_reference_masks_missing")
+
+            mask_entries: list[tuple[ParsedEntity, Image.Image, Region]] = []
+            for index in range(1, 6):
+                mask = mira_bench_reference_masks[f"e{index}"]
+                entity: ParsedEntity | None = None
+                parse_problem = "no_source_reference"
+                source_entity_count = 0
+                for retry in (False, True):
+                    parsed = self.parser.parse(
+                        parser_instruction,
+                        image=sample.image,
+                        mask=mask,
+                        masked_reference_only=True,
+                        mira_bench_masked_reference=retry,
+                    )
+                    mode = f"masked_region_{index}"
+                    if retry:
+                        mode += "_retry"
+                    parse_attempts.append(_parse_attempt_details(mode, parsed))
+                    component_entities = [
+                        candidate
+                        for candidate in parsed.entities
+                        if candidate.present_in_source
+                    ]
+                    source_entity_count = len(component_entities)
+                    if len(component_entities) != 1:
+                        parse_problem = f"expected_one_source_reference_got_{len(component_entities)}"
+                        continue
+                    try:
+                        locate_spans(parser_instruction, component_entities)
+                    except AnnotationError as exc:
+                        parse_problem = str(exc)
+                        continue
+                    entity = component_entities[0]
+                    break
+
+                if entity is None:
+                    if source_entity_count == 0:
+                        raise NoReferenceError(
+                            f"mira_bench_mask_region_no_source_reference:e{index}",
+                            parse_attempts=parse_attempts,
+                        )
+                    raise AnnotationError(
+                        f"mira_bench_mask_region_parse_failed:e{index}:{parse_problem}"
+                    )
+
+                bbox = mask_bbox(mask, sample.image.size)
+                if bbox is None:
+                    raise AnnotationError(f"mira_bench_reference_mask_empty:e{index}")
+                mask_entries.append(
+                    (
+                        entity,
+                        mask,
+                        Region(
+                            bbox_xyxy=bbox,
+                            image_size=sample.image.size,
+                            confidence=1.0,
+                            label=entity.grounding_query,
+                            source="benchmark_mask:object_instance",
+                        ),
+                    )
+                )
+
+            entities = []
+            mask_entries = _assign_repeated_masked_occurrences(
+                parser_instruction,
+                mask_entries,
+            )
+            for entity, mask, region in _disambiguate_masked_spans(
+                parser_instruction, mask_entries
+            ):
+                start, end, _ = locate_spans(parser_instruction, [entity])[0]
+                component_region_queues.setdefault((start, end), []).append(
+                    (region, mask)
+                )
+                entities.append(entity)
+            mask_guidance_used = True
+            mask_guidance_reasons.append("mira_bench_reference_masks")
         elif multi_object_remove:
             if sample.mask is None or sample.mask.getbbox() is None:
                 raise AnnotationError("multi_object_remove_mask_missing_or_empty")
@@ -709,7 +823,7 @@ class Annotator:
 
         located = (
             _locate_spans_allow_same(parser_instruction, entities)
-            if multi_object_add or multi_object_remove
+            if multi_object_add or multi_object_remove or mira_bench_reference_only
             else locate_spans(parser_instruction, entities)
         )
         mixed = replace_spans(
@@ -723,7 +837,7 @@ class Annotator:
         component_region_indices: dict[tuple[int, int], int] = {}
         for i, (start, end, entity) in enumerate(located, 1):
             component_region = component_regions.get((start, end))
-            if multi_object_add or multi_object_remove:
+            if multi_object_add or multi_object_remove or mira_bench_reference_only:
                 key = (start, end)
                 queue = component_region_queues.get(key, [])
                 queue_index = component_region_indices.get(key, 0)
@@ -782,6 +896,7 @@ class Annotator:
                         or mask_guided_spatial_reference
                         or multi_object_add
                         or multi_object_remove
+                        or mira_bench_reference_only
                     )
                     else {}
                 ),

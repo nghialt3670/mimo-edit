@@ -80,6 +80,7 @@ class AnnotationConfig:
             "compbench": "compbench",
             "magicbrush": "magicbrush",
             "refedit_bench": "refedit_bench",
+            "mira_bench": "mira_bench",
         }
         try:
             output_directory = default_directories[benchmark]

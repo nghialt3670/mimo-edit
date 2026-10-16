@@ -1,4 +1,4 @@
-from .adapters import compbench, magicbrush, refedit_bench
+from .adapters import compbench, magicbrush, mira_bench, refedit_bench
 from .core import (
     AnnotationError,
     Annotator,
@@ -47,6 +47,7 @@ __all__ = [
     "create_annotation_run_directory",
     "locate_spans",
     "magicbrush",
+    "mira_bench",
     "refedit_bench",
     "replace_spans",
     "run_hf_annotation",

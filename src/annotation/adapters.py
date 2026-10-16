@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from PIL import Image, ImageDraw
@@ -132,5 +133,96 @@ def compbench(row: dict[str, Any], split: str, index: int) -> Sample:
             "image_path": image_path,
             "caption": row["caption"],
             "mask_kind": "edit_region",
+        },
+    )
+
+
+def _mira_bench_masks(
+    polygons: Any,
+    size: tuple[int, int],
+    expected_count: int,
+) -> tuple[Image.Image, list[Image.Image]]:
+    if not isinstance(polygons, list) or len(polygons) != expected_count:
+        raise ValueError(
+            f"MIRA-Bench mask must contain {expected_count} polygons, "
+            f"got {len(polygons) if isinstance(polygons, list) else type(polygons).__name__}"
+        )
+
+    union = Image.new("L", size, 0)
+    union_draw = ImageDraw.Draw(union)
+    masks: list[Image.Image] = []
+    for index, polygon in enumerate(polygons):
+        if (
+            isinstance(polygon, list)
+            and len(polygon) == 1
+            and isinstance(polygon[0], list)
+        ):
+            polygon = polygon[0]
+        if not isinstance(polygon, list) or len(polygon) < 6 or len(polygon) % 2:
+            raise ValueError(
+                f"MIRA-Bench mask polygon {index} must contain at least three x/y pairs"
+            )
+        points = list(zip(polygon[::2], polygon[1::2], strict=True))
+        mask = Image.new("L", size, 0)
+        ImageDraw.Draw(mask).polygon(points, fill=255)
+        if mask.getbbox() is None:
+            raise ValueError(f"MIRA-Bench mask polygon {index} is empty")
+        union_draw.polygon(points, fill=255)
+        masks.append(mask)
+    return union, masks
+
+
+def mira_bench(
+    row: dict[str, Any],
+    split: str,
+    index: int,
+    *,
+    image_root: str | Path,
+) -> Sample:
+    """Adapt MIRA-Bench JSONL rows and their per-reference polygons."""
+    required = {"image", "editing_instruction", "mask"}
+    _require(row, required, "MIRA-Bench")
+    image_name = row["image"]
+    if not isinstance(image_name, str) or not image_name:
+        raise TypeError("MIRA-Bench image must be a non-empty relative path")
+
+    root = Path(image_root).expanduser().resolve()
+    relative_image_path = Path(image_name)
+    if relative_image_path.is_absolute() or ".." in relative_image_path.parts:
+        raise ValueError(
+            f"MIRA-Bench image path escapes benchmark directory: {image_name!r}"
+        )
+    image_path = root / relative_image_path
+    with Image.open(image_path) as image_file:
+        image = image_file.convert("RGB")
+
+    instruction = row["editing_instruction"]
+    if not isinstance(instruction, str) or not instruction.strip():
+        raise ValueError("MIRA-Bench editing_instruction must be a non-empty string")
+    union_mask, reference_masks = _mira_bench_masks(
+        row["mask"],
+        image.size,
+        expected_count=5,
+    )
+    raw_index = int(row.get("_row_index", index))
+    image_uri = f"hf://ziqiangoodgood/MIRAGE/benchmark/{image_name}"
+    # Preserve the established sample ID so existing annotation runs can resume.
+    return Sample(
+        sample_id=f"mirage:{image_name}",
+        benchmark="MIRA-Bench",
+        split=split,
+        image=image,
+        instruction=instruction,
+        mask=union_mask,
+        source_ref=image_uri,
+        target_ref=None,
+        metadata={
+            "row_index": raw_index,
+            "image": image_name,
+            "mask_kind": "object_instance",
+        },
+        reference_masks={
+            f"e{reference_index}": mask
+            for reference_index, mask in enumerate(reference_masks, start=1)
         },
     )

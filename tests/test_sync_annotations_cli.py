@@ -64,6 +64,32 @@ class SyncAnnotationsCliTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("already sorted", result.stdout)
 
+    def test_mira_bench_benchmark(self):
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            annotations = Path(temporary_directory) / "annotations.jsonl"
+            audit = Path(temporary_directory) / "audit.jsonl"
+            annotations.write_text("", encoding="utf-8")
+            audit.write_text("", encoding="utf-8")
+
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    str(SCRIPT),
+                    "mira_bench",
+                    "--annotations",
+                    str(annotations),
+                    "--audit",
+                    str(audit),
+                ],
+                cwd=ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("already sorted", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()

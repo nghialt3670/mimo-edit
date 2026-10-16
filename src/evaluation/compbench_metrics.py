@@ -32,6 +32,7 @@ def collect_saved_outputs(
     output_dir: Path,
     *,
     prompt_mode: PromptMode,
+    task_filter: set[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Join saved outputs to annotation-list positions using stable sample IDs.
 
@@ -42,6 +43,9 @@ def collect_saved_outputs(
     images_dir = output_dir / "results" / "images"
     positions_by_sample_id: dict[str, int] = {}
     for position, record in enumerate(records):
+        metadata = record.get("metadata") or {}
+        if task_filter is not None and metadata.get("task") not in task_filter:
+            continue
         sample_id = record.get("sample_id")
         if not isinstance(sample_id, str) or not sample_id:
             raise ValueError(f"Annotation at list position {position} has no sample_id")
@@ -70,7 +74,12 @@ def collect_saved_outputs(
                     f"{result.get('prompt_mode')!r} for {result.get('sample_id')!r}"
                 )
             sample_id = result.get("sample_id")
-            if not isinstance(sample_id, str) or sample_id not in positions_by_sample_id:
+            if (
+                not isinstance(sample_id, str)
+                or sample_id not in positions_by_sample_id
+            ):
+                if task_filter is not None:
+                    continue
                 raise ValueError(
                     f"Result sample_id is not in the selected annotations: "
                     f"{sample_id!r}"
@@ -111,6 +120,11 @@ def collect_saved_outputs(
             },
         )
     if not outputs:
+        if task_filter is not None:
+            raise FileNotFoundError(
+                f"No saved output images for tasks {sorted(task_filter)} found "
+                f"in {images_dir}"
+            )
         raise FileNotFoundError(f"No saved output images found in {images_dir}")
     return [outputs[position] for position in sorted(outputs)]
 

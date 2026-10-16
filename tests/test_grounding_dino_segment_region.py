@@ -7,7 +7,7 @@ from unittest.mock import ANY, Mock, patch
 import torch
 from PIL import Image
 
-from framework.core.agent import _SYSTEM_PROMPT
+from framework.core.prompts import _SYSTEM_PROMPT
 from framework.inference.grounding_dino import grounding_dino_segment_region
 from framework.tools import registry
 from framework.tools.image_editing.segment_object import segment_object

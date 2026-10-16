@@ -29,7 +29,7 @@ Rules:
 - Never rewrite the instruction.
 """
 
-MASKED_REFERENCE_PROMPT = """The input image has the dataset-provided mask overlaid in translucent magenta. Use the highlighted pixels to identify the visible source entity that should become the visual reference. For multi-object removal, each parse highlights one removed instance; identify that instance, not the whole group of removed instances.
+MASKED_REFERENCE_PROMPT = """The input image has the dataset-provided mask overlaid in translucent magenta. Use the highlighted pixels to identify the visible source entity that should become the visual reference. If the instruction contains multiple edits and this mask identifies only one edit region, identify only the source entity for that region; do not annotate the other edits. For multi-object removal, each parse highlights one removed instance; identify that instance, not the whole group of removed instances.
 Return exactly one entity: a verbatim phrase from the instruction that identifies the masked entity. Set present_in_source=true and choose its role based on the instruction:
 - Use role="target" only when the masked entity itself is the entity being edited.
 - Use role="anchor" when the instruction edits a distinct object, part, or accessory associated with the masked entity. In that case, select only the phrase identifying the masked entity; do not include the edited object/part/accessory in the span. Keeping that target phrase outside the span preserves the requested edit in the resulting mixed instruction.
@@ -55,6 +55,11 @@ Keep the span as a complete location expression. If the span includes its leadin
 The span must be copied verbatim from the instruction. Never rewrite the instruction.
 """
 
+MIRA_BENCH_MASKED_REFERENCE_PROMPT = """This MIRA-Bench sample contains five edits. The highlighted mask marks the region for only one of those edits. Return exactly one visible source entity from the instruction clause associated with this mask; ignore the other edits.
+The mask may cover only a small edited part or accessory, such as eyes, clothing, a shell, dirt, or an item held by a person. In that case, identify the complete visible object that the edit refers to, not just the masked part. Use role="target" when that object itself is edited, and role="anchor" when the instruction edits one of its parts or adds something to it.
+Do not return an empty entity list when the highlighted region corresponds to a visible source object described by an instruction clause. Do not select a newly requested object that is not in the source image. The span must be copied verbatim from the instruction.
+"""
+
 
 class Parser(Protocol):
     def parse(
@@ -65,6 +70,7 @@ class Parser(Protocol):
         mask: Image.Image | None = None,
         masked_reference_only: bool = False,
         mask_guided_spatial_reference: bool = False,
+        mira_bench_masked_reference: bool = False,
     ) -> ParsedInstruction: ...
 
 
@@ -101,6 +107,7 @@ class GoogleParser:
         mask: Image.Image | None = None,
         masked_reference_only: bool = False,
         mask_guided_spatial_reference: bool = False,
+        mira_bench_masked_reference: bool = False,
     ) -> ParsedInstruction:
         from google.genai import types
 
@@ -119,6 +126,12 @@ class GoogleParser:
                 else MASKED_SPATIAL_REFERENCE_PROMPT
             )
             system_instruction += "\n" + prompt
+            if mira_bench_masked_reference:
+                if not masked_reference_only:
+                    raise ValueError(
+                        "MIRA-Bench masked-reference guidance requires masked_reference_only"
+                    )
+                system_instruction += "\n" + MIRA_BENCH_MASKED_REFERENCE_PROMPT
             from io import BytesIO
 
             image_buffer = BytesIO()
