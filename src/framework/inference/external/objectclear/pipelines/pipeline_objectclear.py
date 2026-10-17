@@ -670,7 +670,10 @@ class ObjectClearPipeline(
                     hidden_states = kwargs.get("hidden_states")
                     if hidden_states is None and args:
                         hidden_states = args[0]
-                    if isinstance(hidden_states, torch.Tensor) and hidden_states.ndim == 4:
+                    if (
+                        isinstance(hidden_states, torch.Tensor)
+                        and hidden_states.ndim == 4
+                    ):
                         self._objectclear_attention_grid = tuple(
                             hidden_states.shape[-2:]
                         )

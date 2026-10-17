@@ -21,8 +21,8 @@ from .workflows import (
     AnnotationConfig,
     comma_separated_env,
     create_annotation_run_directory,
-    run_hf_annotation,
     resolve_annotation_run_directory,
+    run_hf_annotation,
     selected_rows,
 )
 

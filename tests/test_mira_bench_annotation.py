@@ -12,7 +12,12 @@ from annotation import mira_bench
 from annotation.core import Annotator, NoReferenceError
 from annotation.grounder import MaskOnlyGrounder
 from annotation.runner import convert_rows
-from annotation.schema import ParsedEntity, ParsedInstruction
+from annotation.schema import (
+    MaskClauseAssignment,
+    MaskClauseAssignments,
+    ParsedEntity,
+    ParsedInstruction,
+)
 
 
 class _Parser:
@@ -64,6 +69,48 @@ class _Parser:
         )
 
 
+class _JointParser:
+    """Records joint-assignment calls; per-mask parse must never be used."""
+
+    def __init__(self, results: list[list[tuple[int, int, str]]]) -> None:
+        self.results = iter(results)
+        self.calls = 0
+
+    def parse(self, *args, **kwargs):
+        raise AssertionError("per-mask parse must not run when joint matching works")
+
+    def assign_mira_bench_masks(self, instruction, clauses, *, image, masks):
+        self.calls += 1
+        return MaskClauseAssignments(
+            assignments=[
+                MaskClauseAssignment(
+                    mask_index=mask_index,
+                    clause_index=clause_index,
+                    span=span,
+                    role="target",
+                    grounding_query=span,
+                )
+                for mask_index, clause_index, span in next(self.results)
+            ]
+        )
+
+
+_LIFEBUOY_INSTRUCTION = (
+    "Change the material of the first lifebuoy from the left to leather, "
+    "and change the color of the second lifebuoy from the left to blue, "
+    "and remove the first lifebuoy from the right, "
+    "and add a dragon pattern onto the second lifebuoy from the right, "
+    "and replace the rope on the ground with a lying dog."
+)
+_LIFEBUOY_SPANS = [
+    "the first lifebuoy from the left",
+    "the second lifebuoy from the left",
+    "the first lifebuoy from the right",
+    "the second lifebuoy from the right",
+    "the rope on the ground",
+]
+
+
 def _row() -> dict:
     return {
         "image": "0.jpg",
@@ -80,6 +127,80 @@ def _row() -> dict:
             [20, 20, 25, 20, 25, 25, 20, 25],
         ],
     }
+
+
+class MiraBenchJointAssignmentTests(unittest.TestCase):
+    def _sample(self, root):
+        Image.new("RGB", (40, 40), "white").save(root / "0.jpg")
+        row = _row()
+        row["editing_instruction"] = _LIFEBUOY_INSTRUCTION
+        return mira_bench(row, "test", 0, image_root=root)
+
+    def test_masks_map_to_distinct_clauses_even_when_out_of_order(self):
+        with TemporaryDirectory() as temporary_directory:
+            sample = self._sample(Path(temporary_directory))
+            # Mask 2 belongs to clause 4 and mask 4 to clause 2.
+            parser = _JointParser(
+                [
+                    [
+                        (1, 1, _LIFEBUOY_SPANS[0]),
+                        (2, 4, _LIFEBUOY_SPANS[3]),
+                        (3, 3, _LIFEBUOY_SPANS[2]),
+                        (4, 2, _LIFEBUOY_SPANS[1]),
+                        (5, 5, _LIFEBUOY_SPANS[4]),
+                    ]
+                ]
+            )
+            result = Annotator(parser=parser, grounder=MaskOnlyGrounder()).annotate(
+                sample
+            )
+        self.assertEqual(parser.calls, 1)
+        self.assertEqual(
+            result.mixed_instruction,
+            "Change the material of <v1> to leather, and change the color of <v2> "
+            "to blue, and remove <v3>, and add a dragon pattern onto <v4>, "
+            "and replace <v5> with a lying dog.",
+        )
+        by_span = {ref.span: ref for ref in result.references}
+        # Mask 4 is the second-from-left lifebuoy; mask 2 the second from right.
+        self.assertEqual(
+            by_span[_LIFEBUOY_SPANS[1]].region.bbox_xyxy, (10.0, 10.0, 16.0, 16.0)
+        )
+        self.assertEqual(
+            by_span[_LIFEBUOY_SPANS[3]].region.bbox_xyxy, (10.0, 1.0, 16.0, 7.0)
+        )
+
+    def test_non_one_to_one_assignment_is_retried_then_rejected(self):
+        bad = [(i, 1, _LIFEBUOY_SPANS[0]) for i in range(1, 6)]
+        with TemporaryDirectory() as temporary_directory:
+            sample = self._sample(Path(temporary_directory))
+            parser = _JointParser([bad, bad])
+            with self.assertRaisesRegex(Exception, "not_one_to_one"):
+                Annotator(parser=parser, grounder=MaskOnlyGrounder()).annotate(sample)
+        self.assertEqual(parser.calls, 2)
+
+    def test_convert_rows_can_select_and_overwrite_rows(self):
+        with TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            self._sample(root)
+            row = _row()
+            row["editing_instruction"] = _LIFEBUOY_INSTRUCTION
+            other = dict(row, image="1.jpg")
+            Image.new("RGB", (40, 40), "white").save(root / "1.jpg")
+            good = [(i, i, _LIFEBUOY_SPANS[i - 1]) for i in range(1, 6)]
+            output = root / "mira_bench_mixed.jsonl"
+            parser = _JointParser([good])
+            summary = convert_rows(
+                rows=[row, other],
+                adapter=partial(mira_bench, image_root=root),
+                split="test",
+                annotator=Annotator(parser=parser, grounder=MaskOnlyGrounder()),
+                output=output,
+                row_indices=[1],
+            )
+            ids = [json.loads(line)["sample_id"] for line in output.open()]
+        self.assertEqual(summary["accepted"], 1)
+        self.assertEqual(ids, ["mirage:1.jpg"])
 
 
 class MiraBenchAnnotationTests(unittest.TestCase):

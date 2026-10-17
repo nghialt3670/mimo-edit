@@ -177,11 +177,9 @@ class MiraBenchImageLoader:
             raise ValueError(
                 f"MIRA-Bench image reference escapes dataset directory: {reference!r}"
             )
-        resolved_path = (self.image_root / image_path).resolve()
-        if not resolved_path.is_relative_to(self.image_root):
-            raise ValueError(
-                f"MIRA-Bench image reference escapes dataset directory: {reference!r}"
-            )
+        # Don't resolve symlinks: HF snapshot files link into a separate blobs dir.
+        # Containment is already guaranteed by rejecting absolute and ".." paths.
+        resolved_path = self.image_root / image_path
         if not resolved_path.is_file():
             raise FileNotFoundError(
                 f"MIRA-Bench image not found for sample "

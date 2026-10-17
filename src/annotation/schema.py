@@ -30,6 +30,22 @@ class ParsedInstruction(BaseModel):
     )
 
 
+class MaskClauseAssignment(BaseModel):
+    mask_index: int = Field(description="1-based number of the highlighted region.")
+    clause_index: int = Field(description="1-based number of the matching clause.")
+    span: str = Field(
+        description="Exact verbatim span copied from that clause naming the source object."
+    )
+    role: Role
+    grounding_query: str = Field(
+        description="Short phrase describing the visible source-image entity."
+    )
+
+
+class MaskClauseAssignments(BaseModel):
+    assignments: list[MaskClauseAssignment] = Field(default_factory=list)
+
+
 class Region(BaseModel):
     bbox_xyxy: tuple[float, float, float, float]
     image_size: tuple[int, int]

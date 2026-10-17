@@ -96,11 +96,13 @@ def convert_rows(
     limit: int | None = None,
     save_assets: bool = True,
     overwrite_sample_ids: set[str] | None = None,
+    row_indices: Iterable[int] | None = None,
 ) -> dict[str, int]:
     """Append new results, skipping completed samples and retrying audited samples.
 
     ``limit`` caps attempted samples, not rows already present in the output or
-    audit files, so repeated runs continue through the dataset.
+    audit files, so repeated runs continue through the dataset. ``row_indices``
+    restricts annotation to those zero-based row positions.
     """
     output = Path(output)
     failures = (
@@ -109,6 +111,7 @@ def convert_rows(
     output.parent.mkdir(parents=True, exist_ok=True)
     accepted_ids, previous_status = _load_resume_state(output, failures)
     overwrite_sample_ids = overwrite_sample_ids or set()
+    selected_indices = None if row_indices is None else set(row_indices)
 
     counts = {"accepted": 0, "skipped": 0, "failed": 0, "resumed": 0, "retried": 0}
     iterator = enumerate(rows)
@@ -116,6 +119,8 @@ def convert_rows(
     attempted_ids: set[str] = set()
 
     for i, row in tqdm(iterator, desc=split):
+        if selected_indices is not None and i not in selected_indices:
+            continue
         sample = None
         try:
             sample = adapter(row, split, i)

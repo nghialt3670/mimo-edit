@@ -43,9 +43,7 @@ class GroundingDinoInferenceConfig:
     text_threshold: float = 0.25
 
     def __post_init__(self) -> None:
-        validate_number_range(
-            "grounding_dino.box_threshold", self.box_threshold, 0, 1
-        )
+        validate_number_range("grounding_dino.box_threshold", self.box_threshold, 0, 1)
         validate_number_range(
             "grounding_dino.text_threshold", self.text_threshold, 0, 1
         )
@@ -58,8 +56,13 @@ class ObjectClearInferenceConfig:
     num_inference_steps: int = 8
     guidance_scale: float = 2.0
     working_min_side: int = 384
+    # The input mask is dilated by this fraction of its bounding-box longer side.
+    mask_padding_ratio: float = 0.05
 
     def __post_init__(self) -> None:
+        validate_non_negative_number(
+            "object_clear.mask_padding_ratio", self.mask_padding_ratio
+        )
         validate_positive_integer(
             "object_clear.num_inference_steps", self.num_inference_steps
         )

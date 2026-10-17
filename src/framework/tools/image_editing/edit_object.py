@@ -16,6 +16,27 @@ from ..utils import (
     validate_text,
 )
 
+BOX_EXPAND_RATIO = 0.1
+
+
+def _expanded_box_mask(
+    mask: Image.Image, ratio: float = BOX_EXPAND_RATIO
+) -> Image.Image:
+    left, top, right, bottom = mask.convert("L").getbbox()
+    pad_x = round((right - left) * ratio)
+    pad_y = round((bottom - top) * ratio)
+    box_mask = Image.new("L", mask.size, 0)
+    box_mask.paste(
+        255,
+        (
+            max(0, left - pad_x),
+            max(0, top - pad_y),
+            min(mask.width, right + pad_x),
+            min(mask.height, bottom + pad_y),
+        ),
+    )
+    return box_mask
+
 
 def _validate_edit_object_args(
     image: Image.Image,
@@ -63,12 +84,14 @@ def edit_object(
     mode: Literal["local", "regional", "global"],
     padding: float | None = None,
 ) -> Image.Image:
+    if padding is None:
+        padding = 0.25
     _validate_edit_object_args(image, mask, prompt, mode, padding)
     return flux2_klein_edit_object(
         ctx.model_pool,
         image,
-        mask,
+        _expanded_box_mask(mask),
         prompt,
         mode=mode,
-        padding=0.25 if padding is None else padding,
+        padding=padding,
     )

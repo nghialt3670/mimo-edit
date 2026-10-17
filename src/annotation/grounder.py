@@ -107,9 +107,7 @@ def _spatial_split(binary: np.ndarray) -> tuple[np.ndarray, np.ndarray] | None:
     points = np.column_stack((xs, ys)).astype(np.float64)
     center = points.mean(axis=0)
     first_index = int(np.argmax(np.sum((points - center) ** 2, axis=1)))
-    second_index = int(
-        np.argmax(np.sum((points - points[first_index]) ** 2, axis=1))
-    )
+    second_index = int(np.argmax(np.sum((points - points[first_index]) ** 2, axis=1)))
     if first_index == second_index:
         return None
 
@@ -256,7 +254,9 @@ def mask_components(
         while len(components) < expected_count:
             if not components:
                 break
-            split_index = max(range(len(components)), key=lambda index: components[index][0])
+            split_index = max(
+                range(len(components)), key=lambda index: components[index][0]
+            )
             component_mask = np.asarray(components[split_index][1]) > 0
             component_area = int(component_mask.sum())
             split_candidates = (

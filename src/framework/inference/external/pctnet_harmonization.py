@@ -20,15 +20,14 @@ PCT-Net adjusts foreground color/tonality, not geometry or texture.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Sequence
-import sys
 
 import cv2
 import numpy as np
 import torch
 from PIL import Image
-
 
 DEFAULT_UPSTREAM = Path(__file__).resolve().parent / "pctnet_upstream"
 

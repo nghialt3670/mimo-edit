@@ -45,6 +45,60 @@ class NoReferenceError(AnnotationError):
         self.parse_attempts = parse_attempts or []
 
 
+CLAUSE_SEPARATOR_RE = re.compile(r",\s+(?:and\s+)?")
+
+
+def _split_clauses(text: str) -> list[tuple[int, int]]:
+    """Return (start, end) offsets of comma/"and"-separated edit clauses."""
+    spans: list[tuple[int, int]] = []
+    cursor = 0
+    for match in CLAUSE_SEPARATOR_RE.finditer(text):
+        spans.append((cursor, match.start()))
+        cursor = match.end()
+    spans.append((cursor, len(text)))
+    return [(start, end) for start, end in spans if text[start:end].strip()]
+
+
+def _mira_bench_assignment_entities(
+    text: str,
+    clause_spans: list[tuple[int, int]],
+    assignments: list,
+    expected_count: int,
+) -> list[ParsedEntity]:
+    """Validate a one-to-one mask/clause matching; return entities by mask index."""
+    by_mask = {item.mask_index: item for item in assignments}
+    if (
+        len(assignments) != expected_count
+        or set(by_mask) != set(range(1, expected_count + 1))
+        or {item.clause_index for item in assignments}
+        != set(range(1, expected_count + 1))
+    ):
+        raise AnnotationError("mira_bench_assignment_not_one_to_one")
+    entities: list[ParsedEntity] = []
+    for mask_index in range(1, expected_count + 1):
+        item = by_mask[mask_index]
+        start, end = clause_spans[item.clause_index - 1]
+        offset = text.find(item.span, start, end) if item.span else -1
+        if offset < 0:
+            raise AnnotationError(
+                f"mira_bench_assignment_span_not_in_clause:e{mask_index}:{item.span!r}"
+            )
+        occurrence = sum(
+            1
+            for match in re.finditer(re.escape(item.span), text)
+            if match.start() < offset
+        )
+        entities.append(
+            ParsedEntity(
+                span=item.span,
+                occurrence=occurrence,
+                role=item.role,
+                grounding_query=item.grounding_query,
+            )
+        )
+    return entities
+
+
 def _parse_attempt_details(mode: str, parsed: ParsedInstruction) -> dict[str, object]:
     entities = parsed.entities
     return {
@@ -579,9 +633,66 @@ class Annotator:
                 raise AnnotationError("mira_bench_reference_masks_missing")
 
             mask_entries: list[tuple[ParsedEntity, Image.Image, Region]] = []
+            clause_spans = _split_clauses(parser_instruction)
+            assign_masks = getattr(self.parser, "assign_mira_bench_masks", None)
+            joint_entities: list[ParsedEntity] | None = None
+            if assign_masks is not None and len(clause_spans) == 5:
+                masks_in_order = [
+                    mira_bench_reference_masks[f"e{i}"] for i in range(1, 6)
+                ]
+                clauses = [parser_instruction[a:b] for a, b in clause_spans]
+                joint_problem = ""
+                for _ in range(2):
+                    result = assign_masks(
+                        parser_instruction,
+                        clauses,
+                        image=sample.image,
+                        masks=masks_in_order,
+                    )
+                    parse_attempts.append(
+                        {
+                            "mode": "mira_bench_joint_assignment",
+                            "assignments": [
+                                item.model_dump() for item in result.assignments
+                            ],
+                        }
+                    )
+                    try:
+                        joint_entities = _mira_bench_assignment_entities(
+                            parser_instruction,
+                            clause_spans,
+                            result.assignments,
+                            5,
+                        )
+                        break
+                    except AnnotationError as exc:
+                        joint_problem = str(exc)
+                if joint_entities is None:
+                    raise AnnotationError(joint_problem)
             for index in range(1, 6):
                 mask = mira_bench_reference_masks[f"e{index}"]
                 entity: ParsedEntity | None = None
+                if joint_entities is not None:
+                    entity = joint_entities[index - 1]
+                    bbox = mask_bbox(mask, sample.image.size)
+                    if bbox is None:
+                        raise AnnotationError(
+                            f"mira_bench_reference_mask_empty:e{index}"
+                        )
+                    mask_entries.append(
+                        (
+                            entity,
+                            mask,
+                            Region(
+                                bbox_xyxy=bbox,
+                                image_size=sample.image.size,
+                                confidence=1.0,
+                                label=entity.grounding_query,
+                                source="benchmark_mask:object_instance",
+                            ),
+                        )
+                    )
+                    continue
                 parse_problem = "no_source_reference"
                 source_entity_count = 0
                 for retry in (False, True):

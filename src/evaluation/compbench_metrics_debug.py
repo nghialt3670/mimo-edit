@@ -34,7 +34,9 @@ def _resolve_artifact(
             }
             suffix = suffixes.get(field)
             derived_path = (
-                output_dir / "results" / "images"
+                output_dir
+                / "results"
+                / "images"
                 / output_path.name.replace("_output.png", suffix)
                 if suffix is not None
                 else output_path
@@ -49,7 +51,9 @@ def _resolve_artifact(
         if recorded_path.is_file():
             return recorded_path
         if field in {"trajectory_text_path", "raw_trajectory_path", "raw_path"}:
-            local_path = output_dir / "logs" / recorded_path.parent.name / recorded_path.name
+            local_path = (
+                output_dir / "logs" / recorded_path.parent.name / recorded_path.name
+            )
         else:
             local_path = output_dir / "results" / "images" / recorded_path.name
         if local_path.is_file():
@@ -62,12 +66,13 @@ def _raw_prompt_details(path: Path | None) -> str:
         return "<p><i>Raw model prompts are not available for this run.</i></p>"
 
     payload = json.loads(path.read_text(encoding="utf-8"))
-    raw_steps = payload if isinstance(payload, list) else payload.get("agent_raw_steps", [])
+    raw_steps = (
+        payload if isinstance(payload, list) else payload.get("agent_raw_steps", [])
+    )
     prompt_steps = [
         step
         for step in raw_steps
-        if isinstance(step, dict)
-        and isinstance(step.get("model_input_messages"), list)
+        if isinstance(step, dict) and isinstance(step.get("model_input_messages"), list)
     ]
     if not prompt_steps:
         return "<p><i>No raw model input messages were saved for this run.</i></p>"
@@ -85,9 +90,7 @@ def _raw_prompt_details(path: Path | None) -> str:
         )
     return (
         f"<details><summary>Raw LLM prompts ({len(prompt_steps)} model call(s))"
-        "</summary>"
-        + "".join(sections)
-        + "</details>"
+        "</summary>" + "".join(sections) + "</details>"
     )
 
 
@@ -95,7 +98,7 @@ def _image_card(title: str, path: Path | None) -> str:
     escaped_title = html.escape(title)
     if path is None:
         return (
-            '<div><b>'
+            "<div><b>"
             f"{escaped_title}</b><p><i>Not available in this run</i></p></div>"
         )
     with Image.open(path) as opened_image:
@@ -106,9 +109,9 @@ def _image_card(title: str, path: Path | None) -> str:
     encoded = base64.b64encode(buffer.getvalue()).decode("ascii")
     link = html.escape(path.resolve().as_uri(), quote=True)
     return (
-        f"<div><b>{escaped_title}</b><a href=\"{link}\">"
-        f"<img src=\"data:image/jpeg;base64,{encoded}\" alt=\"{escaped_title}\" "
-        "style=\"display:block;max-width:100%;max-height:280px;object-fit:contain;margin-top:4px\"></a></div>"
+        f'<div><b>{escaped_title}</b><a href="{link}">'
+        f'<img src="data:image/jpeg;base64,{encoded}" alt="{escaped_title}" '
+        'style="display:block;max-width:100%;max-height:280px;object-fit:contain;margin-top:4px"></a></div>'
     )
 
 
@@ -123,7 +126,9 @@ def _annotation_text(annotation: dict[str, Any]) -> str:
             parts.append(f"bbox_xyxy={region['bbox_xyxy']}")
         description = html.escape(" | ".join(str(part) for part in parts if part))
         items.append(f"<li>{description}</li>")
-    return "<ul>" + "".join(items) + "</ul>" if items else "No object references recorded."
+    return (
+        "<ul>" + "".join(items) + "</ul>" if items else "No object references recorded."
+    )
 
 
 def display_worst_sample_details(
@@ -165,7 +170,7 @@ def display_worst_sample_details(
         text = trajectory_path.read_text(encoding="utf-8")
         trajectory = (
             f"<details><summary>Agent trajectory ({len(text.splitlines())} lines)</summary>"
-            f"<pre style=\"white-space:pre-wrap;max-height:600px;overflow:auto\">"
+            f'<pre style="white-space:pre-wrap;max-height:600px;overflow:auto">'
             f"{html.escape(text)}</pre></details>"
         )
     raw_path = _resolve_artifact(

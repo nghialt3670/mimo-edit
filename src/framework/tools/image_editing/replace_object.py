@@ -4,7 +4,7 @@ from PIL import Image
 
 from framework.inference import (
     flux2_klein_add_object_with_box,
-    object_clear_remove_object,
+    flux2_klein_remove_object,
 )
 
 from ..context import ToolContext
@@ -62,15 +62,9 @@ def replace_object(
     prompt: str | None = None,
 ) -> Image.Image:
     bounds = _validate_replace_object_args(image, mask, replacement, prompt)
-    clean = object_clear_remove_object(ctx.model_pool, image, mask)
+    clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
     if prompt is not None:
-        return flux2_klein_add_object_with_box(
-            ctx.model_pool.flux2_klein_pipeline,
-            clean,
-            bounds,
-            prompt,
-            config=ctx.model_pool.config.klein,
-        )
+        return flux2_klein_add_object_with_box(ctx.model_pool, clean, bounds, prompt)
 
     if replacement is None:
         raise RuntimeError("replacement or prompt must be provided")

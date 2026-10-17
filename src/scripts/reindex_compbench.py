@@ -59,8 +59,9 @@ def get_sample_id(obj, context):
     if sample_id.count(":") != 1:
         fail(f"{context}: unexpected sample_id format: {sample_id!r}")
     operation, relative_name = sample_id.split(":", 1)
-    if (not re.fullmatch(r"[A-Za-z0-9_]+", operation)
-            or not re.fullmatch(r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\.png", relative_name)):
+    if not re.fullmatch(r"[A-Za-z0-9_]+", operation) or not re.fullmatch(
+        r"[A-Za-z0-9_-]+(?:/[A-Za-z0-9_-]+)*\.png", relative_name
+    ):
         fail(f"{context}: unexpected sample_id format: {sample_id!r}")
     return sample_id
 
@@ -151,7 +152,9 @@ def plan_changes(annotations_path, logs_path, images_path, results_path, sort_re
             fail(f"Unexpected non-file entry in images/: {entry}")
         match = IMAGE_RE.fullmatch(entry.name)
         if not match:
-            fail(f"Unrecognized image name (expected *_{{annotated,output,source,target}}.png): {entry.name}")
+            fail(
+                f"Unrecognized image name (expected *_{{annotated,output,source,target}}.png): {entry.name}"
+            )
         slug, kind = match.group("slug"), match.group("kind")
         sample_id = slug_to_id.get(slug)
         if sample_id is None:
@@ -159,8 +162,10 @@ def plan_changes(annotations_path, logs_path, images_path, results_path, sort_re
         if sample_id not in log_prefix:
             fail(f"Image has no matching logs folder: {entry.name}")
         if match.group("index") != log_prefix[sample_id]:
-            fail(f"Old image/log indices disagree for {sample_id}: "
-                 f"image={match.group('index')}, log={log_prefix[sample_id]}")
+            fail(
+                f"Old image/log indices disagree for {sample_id}: "
+                f"image={match.group('index')}, log={log_prefix[sample_id]}"
+            )
         if kind in image_kinds[sample_id]:
             fail(f"Duplicate image variant {kind!r} for {sample_id}")
         image_kinds[sample_id].add(kind)
@@ -171,8 +176,10 @@ def plan_changes(annotations_path, logs_path, images_path, results_path, sort_re
 
     missing_images = set(log_prefix) - set(image_kinds)
     if missing_images:
-        fail(f"{len(missing_images)} log samples have no image files. Examples: "
-             f"{sorted(missing_images)[:5]}")
+        fail(
+            f"{len(missing_images)} log samples have no image files. Examples: "
+            f"{sorted(missing_images)[:5]}"
+        )
 
     # 4. Update results by sample_id (and optionally sort the records).
     results = read_jsonl(results_path)
@@ -197,8 +204,10 @@ def plan_changes(annotations_path, logs_path, images_path, results_path, sort_re
     if set(result_by_id) != set(log_prefix):
         missing_results = sorted(set(log_prefix) - set(result_by_id))
         extra_results = sorted(set(result_by_id) - set(log_prefix))
-        fail(f"Log/results sample sets differ. Missing results ({len(missing_results)}): "
-             f"{missing_results[:5]}; results without logs ({len(extra_results)}): {extra_results[:5]}")
+        fail(
+            f"Log/results sample sets differ. Missing results ({len(missing_results)}): "
+            f"{missing_results[:5]}; results without logs ({len(extra_results)}): {extra_results[:5]}"
+        )
 
     initial_result_order = [obj["sample_id"] for obj in results]
     if sort_results:
@@ -233,12 +242,16 @@ def plan_changes(annotations_path, logs_path, images_path, results_path, sort_re
         "image_count": image_count,
         "log_count": len(log_prefix),
         "annotation_count": len(ground_truth),
-        "kind_counts": dict(sorted(Counter(k for v in image_kinds.values() for k in v).items())),
+        "kind_counts": dict(
+            sorted(Counter(k for v in image_kinds.values() for k in v).items())
+        ),
         "old_index_mismatches": old_index_mismatches,
     }
 
 
-def apply_changes(plan, annotations_path, logs_path, images_path, results_path, sort_results):
+def apply_changes(
+    plan, annotations_path, logs_path, images_path, results_path, sort_results
+):
     # Back up results BEFORE editing. Manifest makes name changes auditable/reversible.
     token = uuid.uuid4().hex
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -254,8 +267,10 @@ def apply_changes(plan, annotations_path, logs_path, images_path, results_path, 
         "results_file": str(results_path.resolve()),
         "results_backup": str(backup_results.resolve()),
         "sort_results": sort_results,
-        "renames": [{"old": str(src.resolve()), "new": str(dest.absolute())}
-                    for src, dest in plan["changes"]],
+        "renames": [
+            {"old": str(src.resolve()), "new": str(dest.absolute())}
+            for src, dest in plan["changes"]
+        ],
     }
     with (backup_dir / "manifest.json").open("w", encoding="utf-8") as stream:
         json.dump(manifest, stream, indent=2, ensure_ascii=False)
@@ -301,8 +316,9 @@ def apply_changes(plan, annotations_path, logs_path, images_path, results_path, 
 
         # Full post-commit validation. If it fails, restore original results and
         # the original file/directory names using the rename journal.
-        checked = plan_changes(annotations_path, logs_path, images_path,
-                               results_path, sort_results=False)
+        checked = plan_changes(
+            annotations_path, logs_path, images_path, results_path, sort_results=False
+        )
         if checked["changes"] or checked["changed_result_count"]:
             fail("Post-commit validation found remaining incorrect indices/names")
         if sort_results:
@@ -317,8 +333,10 @@ def apply_changes(plan, annotations_path, logs_path, images_path, results_path, 
                 shutil.copy2(backup_results, restore_path)
                 os.replace(restore_path, results_path)
             except OSError as exc:
-                print(f"RESULT RESTORE FAILED: backup at {backup_results}: {exc}",
-                      file=sys.stderr)
+                print(
+                    f"RESULT RESTORE FAILED: backup at {backup_results}: {exc}",
+                    file=sys.stderr,
+                )
         for src, dest in reversed(journal):
             try:
                 os.rename(dest, src)
@@ -334,16 +352,36 @@ def apply_changes(plan, annotations_path, logs_path, images_path, results_path, 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--annotations", type=Path, required=True, help="Ground-truth annotations JSONL")
-    parser.add_argument("--logs", type=Path, required=True, help="Directory of sample log directories")
-    parser.add_argument("--images", type=Path, required=True, help="Directory of sample image files")
-    parser.add_argument("--results", type=Path, required=True, help="Results JSONL to update in-place")
-    parser.add_argument("--sort-results", action="store_true", help="Also order results lines by corrected annotation_index")
-    parser.add_argument("--apply", action="store_true", help="Perform changes (without this, preview only)")
+    parser.add_argument(
+        "--annotations", type=Path, required=True, help="Ground-truth annotations JSONL"
+    )
+    parser.add_argument(
+        "--logs", type=Path, required=True, help="Directory of sample log directories"
+    )
+    parser.add_argument(
+        "--images", type=Path, required=True, help="Directory of sample image files"
+    )
+    parser.add_argument(
+        "--results", type=Path, required=True, help="Results JSONL to update in-place"
+    )
+    parser.add_argument(
+        "--sort-results",
+        action="store_true",
+        help="Also order results lines by corrected annotation_index",
+    )
+    parser.add_argument(
+        "--apply",
+        action="store_true",
+        help="Perform changes (without this, preview only)",
+    )
     args = parser.parse_args()
 
-    paths = (args.annotations.expanduser().absolute(), args.logs.expanduser().absolute(),
-             args.images.expanduser().absolute(), args.results.expanduser().absolute())
+    paths = (
+        args.annotations.expanduser().absolute(),
+        args.logs.expanduser().absolute(),
+        args.images.expanduser().absolute(),
+        args.results.expanduser().absolute(),
+    )
     try:
         plan = plan_changes(*paths, sort_results=args.sort_results)
         print(f"Ground-truth annotations : {plan['annotation_count']}")
@@ -353,7 +391,9 @@ def main():
         print(f"Log/image renames        : {len(plan['changes'])}")
         print(f"Changed result indices   : {plan['changed_result_count']}")
         print(f"Results order changes    : {plan['order_changed']}")
-        print(f"Old result-vs-log index mismatches: {len(plan['old_index_mismatches'])}")
+        print(
+            f"Old result-vs-log index mismatches: {len(plan['old_index_mismatches'])}"
+        )
         for sid, res, log in plan["old_index_mismatches"][:5]:
             print(f"  NOTE: {sid}: results old={res}, log old={log}")
         for src, dest in plan["changes"][:12]:
@@ -361,9 +401,15 @@ def main():
         if len(plan["changes"]) > 12:
             print(f"  ... {len(plan['changes']) - 12} more renames")
         if not args.apply:
-            print("\nDRY RUN: no files changed. Review the mapping, then rerun with --apply.")
+            print(
+                "\nDRY RUN: no files changed. Review the mapping, then rerun with --apply."
+            )
             return
-        if not plan["changes"] and not plan["changed_result_count"] and not plan["order_changed"]:
+        if (
+            not plan["changes"]
+            and not plan["changed_result_count"]
+            and not plan["order_changed"]
+        ):
             print("\nALREADY SYNCHRONIZED: nothing changed.")
             return
         backup_dir = apply_changes(plan, *paths, sort_results=args.sort_results)

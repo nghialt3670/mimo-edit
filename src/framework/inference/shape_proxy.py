@@ -142,8 +142,12 @@ def _parse_color(color: str | tuple[int, int, int]) -> tuple[int, int, int]:
             return ImageColor.getrgb(color)
         except ValueError as exc:
             raise ValueError(f"Invalid color: {color!r}") from exc
-    if len(color) != 3 or any(not isinstance(c, int) or not 0 <= c <= 255 for c in color):
-        raise ValueError("color must be a name, hex string, or RGB tuple of 0..255 ints")
+    if len(color) != 3 or any(
+        not isinstance(c, int) or not 0 <= c <= 255 for c in color
+    ):
+        raise ValueError(
+            "color must be a name, hex string, or RGB tuple of 0..255 ints"
+        )
     return tuple(color)
 
 
@@ -152,20 +156,22 @@ def _auto_contrast_color(region: Image.Image) -> tuple[int, int, int]:
     pixels = np.asarray(region.convert("RGB").resize((64, 64)), dtype=np.float32)
     pixels = pixels.reshape(-1, 3)
     palette = [
-        (255, 106, 55),   # orange
-        (32, 218, 240),   # cyan
-        (247, 58, 177),   # magenta
-        (247, 224, 60),   # yellow
-        (107, 85, 242),   # violet
+        (255, 106, 55),  # orange
+        (32, 218, 240),  # cyan
+        (247, 58, 177),  # magenta
+        (247, 224, 60),  # yellow
+        (107, 85, 242),  # violet
     ]
     # Choose the color whose lower-quartile RGB distance from the background
     # is largest. This avoids using plain gray on gray and similar colors.
     return max(
         palette,
-        key=lambda rgb: float(np.quantile(
-            np.linalg.norm(pixels - np.asarray(rgb, dtype=np.float32), axis=1),
-            0.25,
-        )),
+        key=lambda rgb: float(
+            np.quantile(
+                np.linalg.norm(pixels - np.asarray(rgb, dtype=np.float32), axis=1),
+                0.25,
+            )
+        ),
     )
 
 
@@ -256,8 +262,7 @@ def render_points_in_box(
         shade = float(np.clip(1.0 + zz[i] * 0.18, 0.70, 1.20))
         rgb = tuple(int(np.clip(c * shade, 0, 255)) for c in base_rgb)
         rr = radius
-        draw.ellipse((px - rr, py - rr, px + rr, py + rr),
-                     fill=(*rgb, 255))
+        draw.ellipse((px - rr, py - rr, px + rr, py + rr), fill=(*rgb, 255))
 
     if style == "clay" and min(w, h) >= 60:
         # Mild blur only inside the target box; avoids harsh dotted surfaces.
@@ -312,9 +317,14 @@ def add_shape_proxy(
 
     points = _generate_points(prompt.strip(), _choose_device(device), steps, seed)
     local = render_points_in_box(
-        points, (x2 - x1, y2 - y1),
-        azimuth=azimuth, elevation=elevation, style=style,
-        fit=fit, margin=margin, color=color,
+        points,
+        (x2 - x1, y2 - y1),
+        azimuth=azimuth,
+        elevation=elevation,
+        style=style,
+        fit=fit,
+        margin=margin,
+        color=color,
     )
     output = bg.convert("RGBA")
     output.alpha_composite(local, (x1, y1))
@@ -325,8 +335,9 @@ def _cli():
     parser = argparse.ArgumentParser(description="Make a coarse Point-E object proxy")
     parser.add_argument("image", help="Source image")
     parser.add_argument("prompt", help="Object name, e.g. 'office chair'")
-    parser.add_argument("--box", nargs=4, type=int, required=True,
-                        metavar=("X1", "Y1", "X2", "Y2"))
+    parser.add_argument(
+        "--box", nargs=4, type=int, required=True, metavar=("X1", "Y1", "X2", "Y2")
+    )
     parser.add_argument("--output", default="proxy.png")
     parser.add_argument("--device", default="auto")
     parser.add_argument("--steps", type=int, default=48)
@@ -334,15 +345,25 @@ def _cli():
     parser.add_argument("--azimuth", type=float, default=35)
     parser.add_argument("--elevation", type=float, default=20)
     parser.add_argument("--style", choices=["clay", "points"], default="clay")
-    parser.add_argument("--fit", choices=["contain", "stretch", "cover"], default="contain")
+    parser.add_argument(
+        "--fit", choices=["contain", "stretch", "cover"], default="contain"
+    )
     parser.add_argument("--margin", type=float, default=0.02)
     parser.add_argument("--color", default=None, help="e.g. orange, #ff6600, or auto")
     args = parser.parse_args()
     result = add_shape_proxy(
-        args.image, tuple(args.box), args.prompt,
-        device=args.device, steps=args.steps, seed=args.seed,
-        azimuth=args.azimuth, elevation=args.elevation, style=args.style,
-        fit=args.fit, margin=args.margin, color=args.color,
+        args.image,
+        tuple(args.box),
+        args.prompt,
+        device=args.device,
+        steps=args.steps,
+        seed=args.seed,
+        azimuth=args.azimuth,
+        elevation=args.elevation,
+        style=args.style,
+        fit=args.fit,
+        margin=args.margin,
+        color=args.color,
     )
     result.save(args.output)
     print(f"Saved {args.output}")

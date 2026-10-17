@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+
 from scripts import refedit_bench_inference_mixed, refedit_bench_inference_text
 
 

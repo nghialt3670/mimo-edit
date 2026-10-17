@@ -77,9 +77,7 @@ def _parse_args() -> argparse.Namespace:
     if args.start_index < 0:
         parser.error("--start-index must be zero or greater.")
     if args.samples_file and (args.start_index != 0 or args.limit is not None):
-        parser.error(
-            "--samples-file cannot be combined with --start-index or --limit."
-        )
+        parser.error("--samples-file cannot be combined with --start-index or --limit.")
     if args.run and not args.resume:
         parser.error("--run can only be used with --resume.")
     if args.rerun_completed and not args.resume:

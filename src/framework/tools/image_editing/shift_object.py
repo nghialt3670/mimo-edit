@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from framework.inference.object_clear import object_clear_remove_object
+from framework.inference.flux2_klein import flux2_klein_remove_object
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -43,6 +43,6 @@ def shift_object(
 ) -> Image.Image:
     _validate_shift_object_args(image, mask, offset)
     layer, origin = masked_layer(image, mask)
-    clean = object_clear_remove_object(ctx.model_pool, image, mask)
+    clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
     destination = (round(origin[0] + offset[0]), round(origin[1] + offset[1]))
     return paste_layer(clean, layer, destination)

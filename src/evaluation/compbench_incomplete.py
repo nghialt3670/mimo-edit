@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -59,9 +59,7 @@ def find_incomplete_compbench_samples(
                         or "sample"
                     )
                     renamed_outputs = list(
-                        (run_dir / "results" / "images").glob(
-                            f"*_{safe_id}_output.png"
-                        )
+                        (run_dir / "results" / "images").glob(f"*_{safe_id}_output.png")
                     )
                     reason = "" if len(renamed_outputs) == 1 else "missing_output_file"
         if reason:
@@ -77,9 +75,7 @@ def read_sample_indices(path: Path, records: list[dict[str, Any]]) -> list[int]:
     positions_by_row_index: dict[int, int] = {}
     for position, record in enumerate(records):
         metadata = record.get("metadata")
-        row_index = (
-            metadata.get("row_index") if isinstance(metadata, dict) else None
-        )
+        row_index = metadata.get("row_index") if isinstance(metadata, dict) else None
         if not isinstance(row_index, int) or isinstance(row_index, bool):
             row_index = position
         if row_index in positions_by_row_index:
@@ -91,7 +87,9 @@ def read_sample_indices(path: Path, records: list[dict[str, Any]]) -> list[int]:
 
     indices: list[int] = []
     seen: set[int] = set()
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         value = line.partition("#")[0].strip()
         if not value:
             continue
@@ -128,9 +126,7 @@ def write_sample_indices(
         safe_sample_id = sample_id.replace("\n", " ").replace("\r", " ")
         record = records[index]
         metadata = record.get("metadata")
-        row_index = (
-            metadata.get("row_index") if isinstance(metadata, dict) else None
-        )
+        row_index = metadata.get("row_index") if isinstance(metadata, dict) else None
         if not isinstance(row_index, int) or isinstance(row_index, bool):
             row_index = index
         lines.append(f"{row_index} # {reason}; sample_id={safe_sample_id}")

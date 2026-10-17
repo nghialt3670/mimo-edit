@@ -18,6 +18,7 @@ class ReplaceObjectToolTests(unittest.TestCase):
             model_pool=SimpleNamespace(
                 flux2_klein_pipeline=object(),
                 config=SimpleNamespace(klein=object()),
+                pctnet_pipeline=object(),
             )
         )
 
@@ -25,7 +26,7 @@ class ReplaceObjectToolTests(unittest.TestCase):
         cleaned = Image.new("RGB", self.image.size, "gray")
         with (
             patch(
-                "framework.tools.image_editing.replace_object.object_clear_remove_object",
+                "framework.tools.image_editing.replace_object.flux2_klein_remove_object",
                 return_value=cleaned,
             ) as remove,
             patch(
@@ -43,11 +44,10 @@ class ReplaceObjectToolTests(unittest.TestCase):
         self.assertIs(result, self.image)
         remove.assert_called_once_with(self.ctx.model_pool, self.image, self.mask)
         add.assert_called_once_with(
-            self.ctx.model_pool.flux2_klein_pipeline,
+            self.ctx.model_pool,
             cleaned,
             (4, 3, 12, 11),
             "a small red boat",
-            config=self.ctx.model_pool.config.klein,
         )
 
     def test_image_replacement_keeps_existing_remove_and_paste_behavior(self):
@@ -55,7 +55,7 @@ class ReplaceObjectToolTests(unittest.TestCase):
         replacement = Image.new("RGB", (3, 3), "red")
         with (
             patch(
-                "framework.tools.image_editing.replace_object.object_clear_remove_object",
+                "framework.tools.image_editing.replace_object.flux2_klein_remove_object",
                 return_value=cleaned,
             ) as remove,
             patch(

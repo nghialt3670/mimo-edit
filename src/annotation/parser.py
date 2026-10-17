@@ -8,7 +8,7 @@ from PIL import Image
 
 from framework.utils.randomness import seed_random_generators
 
-from .schema import ParsedInstruction
+from .schema import MaskClauseAssignments, ParsedInstruction
 
 SYSTEM_PROMPT = """You are a strict semantic parser for image-editing benchmark annotation.
 Return only the structured schema requested by the API.
@@ -59,6 +59,64 @@ MIRA_BENCH_MASKED_REFERENCE_PROMPT = """This MIRA-Bench sample contains five edi
 The mask may cover only a small edited part or accessory, such as eyes, clothing, a shell, dirt, or an item held by a person. In that case, identify the complete visible object that the edit refers to, not just the masked part. Use role="target" when that object itself is edited, and role="anchor" when the instruction edits one of its parts or adds something to it.
 Do not return an empty entity list when the highlighted region corresponds to a visible source object described by an instruction clause. Do not select a newly requested object that is not in the source image. The span must be copied verbatim from the instruction.
 """
+
+MIRA_BENCH_ASSIGNMENT_PROMPT = """You are a strict semantic parser for MIRA-Bench image-editing annotation.
+The instruction is split into numbered clauses; each clause is one edit. The image shows exactly as many numbered, colored regions as there are clauses. Each region is the location of the object edited by exactly one clause, and each clause owns exactly one region (a one-to-one matching).
+For every region, find the clause whose edit refers to the object inside that region. Use the object's category, position (left, middle, right, "second from the left", corners), color and size to decide, and make sure no clause or region is used twice. Several clauses may name similar objects, so compare their positions with the regions carefully; clause order does not necessarily match region numbering.
+For each region return:
+- mask_index: the region number shown in the image.
+- clause_index: the matching clause number.
+- span: a phrase copied verbatim from THAT clause naming the existing source object that the clause edits or refers to. For "add X onto Y" use the existing object Y, never the new object X. For "replace Y with X" use Y.
+- role: "target" when the object itself is edited, removed or replaced; "anchor" when something is added onto it or one of its parts is edited.
+- grounding_query: a short description of the visible object.
+Return one assignment per region.
+"""
+
+_MASK_PALETTE = (
+    (230, 25, 75),
+    (60, 180, 75),
+    (0, 130, 200),
+    (245, 130, 48),
+    (145, 30, 180),
+    (70, 240, 240),
+    (240, 50, 230),
+    (210, 245, 60),
+)
+
+
+def _numbered_masks_overlay(
+    image: Image.Image, masks: list[Image.Image]
+) -> Image.Image:
+    from PIL import ImageDraw, ImageFont
+
+    canvas = image.convert("RGBA")
+    for index, mask in enumerate(masks):
+        mask = mask.convert("L")
+        if mask.size != canvas.size:
+            mask = mask.resize(canvas.size, Image.Resampling.NEAREST)
+        color = _MASK_PALETTE[index % len(_MASK_PALETTE)]
+        layer = Image.new("RGBA", canvas.size, (*color, 0))
+        layer.putalpha(mask.point(lambda value: round(value * 0.5)))
+        canvas = Image.alpha_composite(canvas, layer)
+
+    draw = ImageDraw.Draw(canvas)
+    font = ImageFont.load_default(size=max(24, min(canvas.size) // 18))
+    for index, mask in enumerate(masks):
+        bbox = mask.convert("L").getbbox()
+        if bbox is None:
+            continue
+        center = ((bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2)
+        color = _MASK_PALETTE[index % len(_MASK_PALETTE)]
+        draw.text(
+            center,
+            str(index + 1),
+            font=font,
+            fill=color,
+            anchor="mm",
+            stroke_width=3,
+            stroke_fill=(255, 255, 255),
+        )
+    return canvas.convert("RGB")
 
 
 class Parser(Protocol):
@@ -159,6 +217,50 @@ class GoogleParser:
                 return ParsedInstruction.model_validate(response.parsed)
             return ParsedInstruction.model_validate_json(response.text)
 
+        return self._with_retries(call)
+
+    def assign_mira_bench_masks(
+        self,
+        instruction: str,
+        clauses: list[str],
+        *,
+        image: Image.Image,
+        masks: list[Image.Image],
+    ) -> MaskClauseAssignments:
+        """Match every numbered region to its clause in a single LLM call."""
+        from io import BytesIO
+
+        from google.genai import types
+
+        buffer = BytesIO()
+        _numbered_masks_overlay(image, masks).save(buffer, format="PNG")
+        numbered = "\n".join(
+            f"{number}. {clause}" for number, clause in enumerate(clauses, 1)
+        )
+        contents = [
+            f"Instruction:\n{instruction}\n\nClauses:\n{numbered}",
+            types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/png"),
+        ]
+
+        def call() -> MaskClauseAssignments:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=MIRA_BENCH_ASSIGNMENT_PROMPT,
+                    temperature=0,
+                    seed=self.seed,
+                    response_mime_type="application/json",
+                    response_schema=MaskClauseAssignments,
+                ),
+            )
+            if response.parsed is not None:
+                return MaskClauseAssignments.model_validate(response.parsed)
+            return MaskClauseAssignments.model_validate_json(response.text)
+
+        return self._with_retries(call)
+
+    def _with_retries(self, call):
         last_error: Exception | None = None
         for attempt in range(self.max_retries + 1):
             try:

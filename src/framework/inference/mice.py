@@ -37,13 +37,13 @@ def _mice_imports() -> tuple[Any, Any, Any, Any, Any, Any]:
     if str(MICE_SOURCE) not in sys.path:
         sys.path.insert(0, str(MICE_SOURCE))
 
+    from flux2.attention import AttentionSetting, get_attention_processors
     from flux2.pipeline_flux2_klein import Flux2KleinPipeline
     from flux2.transformer_flux2_klein import (
-        Flux2Transformer2DModel,
         Flux2Attention,
         Flux2ParallelSelfAttention,
+        Flux2Transformer2DModel,
     )
-    from flux2.attention import AttentionSetting, get_attention_processors
 
     return (
         Flux2KleinPipeline,
@@ -81,9 +81,9 @@ def load_mice_pipeline(
 
     if device is None:
         device = (
-            "cuda" if torch.cuda.is_available()
-            else "mps" if torch.backends.mps.is_available()
-            else "cpu"
+            "cuda"
+            if torch.cuda.is_available()
+            else "mps" if torch.backends.mps.is_available() else "cpu"
         )
     if dtype is None:
         dtype = torch.bfloat16 if str(device).startswith("cuda") else torch.float32
@@ -100,9 +100,7 @@ def load_mice_pipeline(
         torch_dtype=dtype,
     ).to(device)
 
-    setting = (
-        "apitasmkernelnonlapstrict" if strict else "apitasmkernelnonlap"
-    )
+    setting = "apitasmkernelnonlapstrict" if strict else "apitasmkernelnonlap"
     processors = get_attention_processors(
         AttentionSetting(setting), sigma_scale, kernel_size, temperature
     )
@@ -165,7 +163,8 @@ def mice_add_object_with_box(
     work_height = max(64, math.ceil(height * scale / 16) * 16)
     working = (
         original.resize((work_width, work_height), Image.Resampling.LANCZOS)
-        if (work_width, work_height) != original.size else original
+        if (work_width, work_height) != original.size
+        else original
     )
 
     # Upstream attention processors cache masks; clear between images/boxes.
@@ -205,7 +204,8 @@ def mice_add_object_with_box(
         prompt_settings="outer_local_prompts",
         attention_setting=pipe._mice_attention_setting,
         hard_image_attribute_binding_list_double=list(range(0, 5)),
-        hard_image_attribute_binding_list_single=list(range(0, 20)),        bring_area_to_1024_squared=False,
+        hard_image_attribute_binding_list_single=list(range(0, 20)),
+        bring_area_to_1024_squared=False,
         generator=generator,
         hard_masking_steps=list(range(steps)),
         relaxed_timesteps="soft",

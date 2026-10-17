@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from framework.inference import object_clear_remove_object
+from framework.inference import flux2_klein_remove_object
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -30,6 +30,6 @@ def remove_object(
     ctx: ToolContext, image: Image.Image, mask: Image.Image
 ) -> Image.Image:
     _validate_remove_object_args(image, mask)
-    return object_clear_remove_object(
-        ctx.model_pool, image, mask, "remove the selected object"
+    return flux2_klein_remove_object(
+        ctx.model_pool, image, mask
     )

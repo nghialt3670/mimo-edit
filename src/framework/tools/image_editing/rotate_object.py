@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from framework.inference.object_clear import object_clear_remove_object
+from framework.inference.flux2_klein import flux2_klein_remove_object
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -49,5 +49,5 @@ def rotate_object(
         round(center[0] - rotated.width / 2),
         round(center[1] - rotated.height / 2),
     )
-    clean = object_clear_remove_object(ctx.model_pool, image, mask)
+    clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
     return paste_layer(clean, rotated, destination)

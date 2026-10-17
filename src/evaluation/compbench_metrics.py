@@ -152,8 +152,10 @@ def _resize_image(image: Image.Image) -> Image.Image:
 
 
 def _resize_mask(mask: Image.Image) -> Image.Image:
-    return mask.convert("L").resize(IMAGE_SIZE, Image.Resampling.NEAREST).point(
-        lambda value: 255 if value > 0 else 0
+    return (
+        mask.convert("L")
+        .resize(IMAGE_SIZE, Image.Resampling.NEAREST)
+        .point(lambda value: 255 if value > 0 else 0)
     )
 
 

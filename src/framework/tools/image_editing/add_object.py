@@ -7,6 +7,7 @@ from PIL import Image
 from framework.inference import (
     flux2_klein_add_object_with_box,
     flux2_klein_add_object_with_mask,
+    mice_add_object_with_box,
 )
 
 from ..context import ToolContext
@@ -76,18 +77,6 @@ def add_object(
     _validate_add_object_args(image, prompt, mask, box)
 
     if box is not None:
-        return flux2_klein_add_object_with_box(
-            ctx.model_pool.flux2_klein_pipeline,
-            image,
-            box,
-            prompt,
-            config=ctx.model_pool.config.klein,
-        )
+        return flux2_klein_add_object_with_box(ctx.model_pool, image, box, prompt)
 
-    return flux2_klein_add_object_with_mask(
-        ctx.model_pool.flux2_klein_pipeline,
-        image,
-        mask,
-        prompt,
-        config=ctx.model_pool.config.klein,
-    )
+    return flux2_klein_add_object_with_mask(ctx.model_pool, image, mask, prompt)

@@ -176,9 +176,7 @@ def main() -> None:
         f"{context.annotation_file}"
     )
     if args.rerun_spatial_selector_issues:
-        print(
-            f"Processing {len(sample_indices)} spatial-selector issue samples"
-        )
+        print(f"Processing {len(sample_indices)} spatial-selector issue samples")
     else:
         print(
             f"Processing annotation indices {first_index}..{stop_index - 1} "

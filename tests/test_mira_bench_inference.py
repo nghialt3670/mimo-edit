@@ -43,6 +43,16 @@ class MiraBenchImageLoaderTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "escapes"):
             loader.load_pair({"source_ref": "mira_bench://benchmark/../outside.png"})
 
+    def test_loads_symlinked_snapshot_files(self):
+        blobs = Path(self.temporary_directory.name) / "blobs"
+        blobs.mkdir()
+        Image.new("RGB", (5, 5)).save(blobs / "blob.png", format="PNG")
+        (self.image_root / "linked.png").symlink_to(blobs / "blob.png")
+        image, _ = MiraBenchImageLoader(self.image_root).load_pair(
+            {"source_ref": "mira_bench://benchmark/linked.png"}
+        )
+        self.assertEqual(image.size, (5, 5))
+
     def test_load_sample_uses_mode_specific_instructions(self):
         loader = MiraBenchImageLoader(self.image_root)
         record = {

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from framework.inference.object_clear import object_clear_remove_object
+from framework.inference.flux2_klein import flux2_klein_remove_object
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -52,5 +52,5 @@ def flip_object(
         "y": Image.Transpose.FLIP_TOP_BOTTOM,
     }
     layer, origin = masked_layer(image, mask)
-    clean = object_clear_remove_object(ctx.model_pool, image, mask)
+    clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
     return paste_layer(clean, layer.transpose(transpose[axis]), origin)

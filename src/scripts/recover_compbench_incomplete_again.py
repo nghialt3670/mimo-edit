@@ -9,6 +9,7 @@ original creation outcome cannot be verified; this CAN cause duplicate charges.
 After this tool, run the original compbench_replicate.py with --retry-failed.
 The original runner handles polling, image download, and file layout.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -21,7 +22,10 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
-STATUS_RE = re.compile(r"\b(?:status|status_code)\s*[:=]\s*(402|429)\b|\b(402|429)\s+(?:Payment Required|Insufficient Credit|Too Many Requests)\b", re.I)
+STATUS_RE = re.compile(
+    r"\b(?:status|status_code)\s*[:=]\s*(402|429)\b|\b(402|429)\s+(?:Payment Required|Insufficient Credit|Too Many Requests)\b",
+    re.I,
+)
 AMBIGUOUS_STATUSES = {"create_uncertain", "creating"}
 RETRYABLE_STATUSES = {"rate_limited", "credit_exhausted", "retry_ambiguous"}
 TERMINAL_FAILURES = {"failed", "canceled", "create_error"}
@@ -48,12 +52,18 @@ def parse_date(iso: str | None) -> datetime | None:
 def list_recent_predictions(token: str, max_pages: int) -> list[dict]:
     """Read-only GET: no model inference or billing."""
     import requests
+
     url = "https://api.replicate.com/v1/predictions"
     records: list[dict] = []
     session = requests.Session()
-    session.headers.update({"Authorization": f"Bearer {token}", "Accept": "application/json"})
+    session.headers.update(
+        {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    )
     for _ in range(max_pages):
-        if urlparse(url).netloc != "api.replicate.com" or urlparse(url).path != "/v1/predictions":
+        if (
+            urlparse(url).netloc != "api.replicate.com"
+            or urlparse(url).path != "/v1/predictions"
+        ):
             raise RuntimeError(f"Unexpected API pagination URL: {url}")
         r = session.get(url, timeout=(10, 30))
         r.raise_for_status()
@@ -90,7 +100,11 @@ def find_exact_match(record: dict, remote_predictions: list[dict]) -> list[dict]
         except (ValueError, TypeError):
             continue
         created = parse_date(prediction.get("created_at"))
-        if created is None or not (submitted - timedelta(minutes=2) <= created <= submitted + timedelta(minutes=10)):
+        if created is None or not (
+            submitted - timedelta(minutes=2)
+            <= created
+            <= submitted + timedelta(minutes=10)
+        ):
             continue
         if prediction.get("id"):
             found.append(prediction)
@@ -102,7 +116,10 @@ def atomic_update(path: Path, row: dict) -> None:
     if not backup.exists():
         shutil.copy2(path, backup)
     target = path.with_name(path.name + ".recovery_tmp")
-    target.write_text(json.dumps(row, indent=2, ensure_ascii=False, default=str) + "\n", encoding="utf-8")
+    target.write_text(
+        json.dumps(row, indent=2, ensure_ascii=False, default=str) + "\n",
+        encoding="utf-8",
+    )
     target.replace(path)
 
 
@@ -126,8 +143,14 @@ def classify(record: dict) -> str:
     return f"other_{status}"
 
 
-def recover(root: Path, *, apply: bool, force_ambiguous: bool,
-            remote_predictions: list[dict] | None = None, verbose: bool = True) -> dict:
+def recover(
+    root: Path,
+    *,
+    apply: bool,
+    force_ambiguous: bool,
+    remote_predictions: list[dict] | None = None,
+    verbose: bool = True,
+) -> dict:
     records_root = root / "records"
     if not records_root.is_dir():
         raise FileNotFoundError(f"No records directory: {records_root}")
@@ -163,7 +186,11 @@ def recover(root: Path, *, apply: bool, force_ambiguous: bool,
             updated["status"] = "rate_limited" if code == 429 else "credit_exhausted"
             note = "SAFE: allow new prediction; original POST was rejected"
         elif category == "AMBIGUOUS_no_prediction_id":
-            matches = find_exact_match(record, remote_predictions) if remote_predictions is not None else []
+            matches = (
+                find_exact_match(record, remote_predictions)
+                if remote_predictions is not None
+                else []
+            )
             if len(matches) == 1 and matches[0]["id"] not in assigned_remote_ids:
                 remote = matches[0]
                 updated["prediction_id"] = remote["id"]
@@ -172,7 +199,9 @@ def recover(root: Path, *, apply: bool, force_ambiguous: bool,
                 assigned_remote_ids.add(remote["id"])
                 note = "SAFE: matched existing prediction; will fetch this ID"
             elif len(matches) > 1:
-                note = f"UNRESOLVED: {len(matches)} remote matches; manual review needed"
+                note = (
+                    f"UNRESOLVED: {len(matches)} remote matches; manual review needed"
+                )
             elif force_ambiguous:
                 updated["status"] = "retry_ambiguous"
                 note = "RISK: resubmit without proof old POST was rejected; possible duplicate charge"
@@ -193,28 +222,51 @@ def recover(root: Path, *, apply: bool, force_ambiguous: bool,
                 atomic_update(path, updated)
                 actions["modified"] += 1
         if verbose:
-            print(f"{path.relative_to(records_root)}: {old_status}"
-                  f" | {category} | {note}"
-                  + (f" | -> {updated['status']}" if updated != record else ""))
+            print(
+                f"{path.relative_to(records_root)}: {old_status}"
+                f" | {category} | {note}"
+                + (f" | -> {updated['status']}" if updated != record else "")
+            )
     if verbose:
         print("\nClassification:")
         for category, count in sorted(counts.items()):
             print(f"  {category}: {count}")
-        print(f"Would modify: {actions['would_modify']}; modified: {actions['modified']}")
+        print(
+            f"Would modify: {actions['would_modify']}; modified: {actions['modified']}"
+        )
         if not apply:
-            print("PREVIEW ONLY: no files changed. Use --apply to safely repair confirmed 402/429.")
+            print(
+                "PREVIEW ONLY: no files changed. Use --apply to safely repair confirmed 402/429."
+            )
         else:
             print("Backups for modified records: *.json.bak")
     return {"counts": dict(counts), "actions": dict(actions)}
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--output-dir", default="compbench_replicate_results")
-    p.add_argument("--apply", action="store_true", help="Write changes; without this only preview")
-    p.add_argument("--reconcile-replicate", action="store_true", help="Read-only Replicate history lookup for missing prediction IDs")
-    p.add_argument("--max-pages", type=int, default=20, help="Maximum prediction-history pages (100 per page)")
-    p.add_argument("--force-ambiguous", action="store_true", help="DANGEROUS: resubmit uncertain/no-ID jobs even when creation may have succeeded")
+    p.add_argument(
+        "--apply", action="store_true", help="Write changes; without this only preview"
+    )
+    p.add_argument(
+        "--reconcile-replicate",
+        action="store_true",
+        help="Read-only Replicate history lookup for missing prediction IDs",
+    )
+    p.add_argument(
+        "--max-pages",
+        type=int,
+        default=20,
+        help="Maximum prediction-history pages (100 per page)",
+    )
+    p.add_argument(
+        "--force-ambiguous",
+        action="store_true",
+        help="DANGEROUS: resubmit uncertain/no-ID jobs even when creation may have succeeded",
+    )
     args = p.parse_args()
     if args.force_ambiguous and not args.apply:
         p.error("--force-ambiguous must be combined with --apply")
@@ -226,9 +278,15 @@ def main() -> None:
         if not token:
             p.error("Set REPLICATE_API_TOKEN for --reconcile-replicate")
         remote = list_recent_predictions(token, args.max_pages)
-        print(f"Loaded {len(remote)} Replicate prediction history entries via GET (no inference billing).")
-    recover(Path(args.output_dir).expanduser(), apply=args.apply,
-            force_ambiguous=args.force_ambiguous, remote_predictions=remote)
+        print(
+            f"Loaded {len(remote)} Replicate prediction history entries via GET (no inference billing)."
+        )
+    recover(
+        Path(args.output_dir).expanduser(),
+        apply=args.apply,
+        force_ambiguous=args.force_ambiguous,
+        remote_predictions=remote,
+    )
 
 
 if __name__ == "__main__":
