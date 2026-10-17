@@ -66,9 +66,7 @@ class AnnotationRunnerOverwriteTests(unittest.TestCase):
                 [record["sample_id"] for record in records],
                 ["sample-a", "sample-b"],
             )
-            self.assertEqual(
-                records[0]["original_instruction"], "updated instruction"
-            )
+            self.assertEqual(records[0]["original_instruction"], "updated instruction")
             self.assertEqual(records[1]["value"], "keep")
 
     def test_failed_overwrite_keeps_the_previous_annotation(self):

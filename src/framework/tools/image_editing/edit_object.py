@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Literal
 
+import numpy as np
 from PIL import Image
+from scipy.ndimage import maximum_filter
 
 from framework.inference import flux2_klein_edit_object
 
@@ -16,26 +18,17 @@ from ..utils import (
     validate_text,
 )
 
-BOX_EXPAND_RATIO = 0.1
+MASK_EXPAND_RATIO = 0.05
 
 
-def _expanded_box_mask(
-    mask: Image.Image, ratio: float = BOX_EXPAND_RATIO
-) -> Image.Image:
-    left, top, right, bottom = mask.convert("L").getbbox()
-    pad_x = round((right - left) * ratio)
-    pad_y = round((bottom - top) * ratio)
-    box_mask = Image.new("L", mask.size, 0)
-    box_mask.paste(
-        255,
-        (
-            max(0, left - pad_x),
-            max(0, top - pad_y),
-            min(mask.width, right + pad_x),
-            min(mask.height, bottom + pad_y),
-        ),
+def _expanded_mask(mask: Image.Image, ratio: float = MASK_EXPAND_RATIO) -> Image.Image:
+    """Dilate the mask by a fraction of its bounding box's longer side."""
+    binary = mask.convert("L").point(lambda v: 255 if v >= 128 else 0)
+    left, top, right, bottom = binary.getbbox()
+    radius = max(1, round(max(right - left, bottom - top) * ratio))
+    return Image.fromarray(
+        maximum_filter(np.asarray(binary), size=2 * radius + 1, mode="constant", cval=0)
     )
-    return box_mask
 
 
 def _validate_edit_object_args(
@@ -90,8 +83,9 @@ def edit_object(
     return flux2_klein_edit_object(
         ctx.model_pool,
         image,
-        _expanded_box_mask(mask),
+        _expanded_mask(mask),
         prompt,
         mode=mode,
         padding=padding,
+        whole_box=True,
     )

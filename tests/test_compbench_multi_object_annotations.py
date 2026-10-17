@@ -90,9 +90,7 @@ class CompBenchMultiObjectAnnotationTests(unittest.TestCase):
         self.assertTrue(second.any())
         self.assertFalse(np.logical_and(first, second).any())
         self.assertEqual(len(parser.calls), 2)
-        self.assertTrue(
-            all(call["masked_reference_only"] for call in parser.calls)
-        )
+        self.assertTrue(all(call["masked_reference_only"] for call in parser.calls))
 
     def test_connected_two_object_mask_is_split_without_a_strong_valley(self):
         yy, xx = np.mgrid[:120, :120]

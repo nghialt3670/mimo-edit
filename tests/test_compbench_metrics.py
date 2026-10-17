@@ -6,8 +6,8 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from PIL import Image
 import torch
+from PIL import Image
 
 from evaluation.compbench_metrics import (
     _captions,
@@ -163,9 +163,7 @@ class CompBenchMetricsTests(unittest.TestCase):
             image_path = images_dir / "000000_add_sample.png_output.png"
             Image.new("RGB", (3, 3)).save(image_path)
 
-            outputs = collect_saved_outputs(
-                records, run_dir, prompt_mode="mixed"
-            )
+            outputs = collect_saved_outputs(records, run_dir, prompt_mode="mixed")
 
         self.assertEqual(len(outputs), 1)
         self.assertEqual(outputs[0]["record_position"], 0)

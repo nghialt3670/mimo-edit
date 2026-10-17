@@ -86,9 +86,10 @@ class InferenceRerunCleanupTests(unittest.TestCase):
                             "sample_id": record["sample_id"],
                             "annotation_index": index,
                             "status": "completed",
-                            "log_dir": str(logs_dir / (
-                                untouched_stem if index == 0 else selected_stem
-                            )),
+                            "log_dir": str(
+                                logs_dir
+                                / (untouched_stem if index == 0 else selected_stem)
+                            ),
                         }
                     )
                     + "\n"
@@ -142,7 +143,9 @@ class InferenceRerunCleanupTests(unittest.TestCase):
                 json.loads(line)
                 for line in results_path.read_text(encoding="utf-8").splitlines()
             ]
-            self.assertEqual([row["status"] for row in saved_rows], ["completed", "failed"])
+            self.assertEqual(
+                [row["status"] for row in saved_rows], ["completed", "failed"]
+            )
 
 
 if __name__ == "__main__":

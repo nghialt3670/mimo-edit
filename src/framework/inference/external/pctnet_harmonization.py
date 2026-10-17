@@ -34,7 +34,7 @@ DEFAULT_UPSTREAM = Path(__file__).resolve().parent / "pctnet_upstream"
 
 def load_pctnet(
     *,
-    device: str = "cpu",
+    device: str = "mps",
     variant: str = "CNN",
     upstream_dir: str | Path = DEFAULT_UPSTREAM,
 ):

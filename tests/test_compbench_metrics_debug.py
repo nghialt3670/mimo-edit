@@ -5,11 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from evaluation.common import _write_raw_agent_trajectory, json_safe
 from evaluation.compbench_metrics_debug import (
     _raw_prompt_details,
     _resolve_artifact,
 )
-from evaluation.common import _write_raw_agent_trajectory, json_safe
 
 
 class CompBenchMetricsDebugTests(unittest.TestCase):
@@ -80,8 +80,14 @@ class CompBenchMetricsDebugTests(unittest.TestCase):
             {
                 "step_number": 1,
                 "model_input_messages": [
-                    {"role": "system", "content": [{"type": "text", "text": "full system prompt"}]},
-                    {"role": "user", "content": [{"type": "text", "text": "full observation"}]},
+                    {
+                        "role": "system",
+                        "content": [{"type": "text", "text": "full system prompt"}],
+                    },
+                    {
+                        "role": "user",
+                        "content": [{"type": "text", "text": "full observation"}],
+                    },
                 ],
                 "model_output": "raw model output",
                 "code_action": "send_message(text='done')",
@@ -100,9 +106,7 @@ class CompBenchMetricsDebugTests(unittest.TestCase):
         class GdbmDependent:
             def __getattribute__(self, name):
                 if name == "__dict__":
-                    raise ModuleNotFoundError(
-                        "No module named '_gdbm'", name="_gdbm"
-                    )
+                    raise ModuleNotFoundError("No module named '_gdbm'", name="_gdbm")
                 return super().__getattribute__(name)
 
         with tempfile.TemporaryDirectory() as directory:

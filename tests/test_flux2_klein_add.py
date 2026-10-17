@@ -26,7 +26,7 @@ class Flux2KleinAddTests(unittest.TestCase):
         edited = Image.new("RGB", (48, 48), "red")
 
         with patch(
-            "framework.inference.flux2_klein._generate_klein_edit",
+            "framework.inference.flux2_klein.add_object.generate_klein_edit",
             return_value=edited,
         ):
             result = flux2_klein_add_object_with_mask(
@@ -49,7 +49,7 @@ class Flux2KleinAddTests(unittest.TestCase):
 
         with (
             patch(
-                "framework.inference.flux2_klein._generate_klein_edit",
+                "framework.inference.flux2_klein.add_object.generate_klein_edit",
                 return_value=Image.new("RGB", (48, 48), "red"),
             ),
             patch(
@@ -90,7 +90,7 @@ class Flux2KleinAddTests(unittest.TestCase):
         mask.paste(255, (16, 16, 32, 32))
         with (
             patch(
-                "framework.inference.flux2_klein._generate_klein_edit",
+                "framework.inference.flux2_klein.add_object.generate_klein_edit",
                 return_value=Image.new("RGB", (64, 64), "red"),
             ),
             patch(

@@ -18,9 +18,7 @@ class CompBenchSelectionTests(unittest.TestCase):
 
     def test_filters_by_task(self):
         self.assertEqual(
-            select_compbench_indices(
-                _records("add", "remove", "add"), tasks={"add"}
-            ),
+            select_compbench_indices(_records("add", "remove", "add"), tasks={"add"}),
             [0, 2],
         )
 
@@ -50,9 +48,7 @@ class CompBenchSelectionTests(unittest.TestCase):
 
     def test_rejects_unknown_task_with_available_task_names(self):
         with self.assertRaisesRegex(ValueError, "Available tasks: add, remove"):
-            select_compbench_indices(
-                _records("add", "remove"), tasks={"replace"}
-            )
+            select_compbench_indices(_records("add", "remove"), tasks={"replace"})
 
     def test_rejects_start_index_outside_nonempty_annotations(self):
         with self.assertRaisesRegex(ValueError, "outside the annotation file"):

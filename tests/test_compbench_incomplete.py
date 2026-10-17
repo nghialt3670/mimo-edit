@@ -17,8 +17,8 @@ class CompBenchIncompleteTests(unittest.TestCase):
             run_dir = Path(directory)
             valid_output = run_dir / "valid.png"
             valid_output.write_bytes(b"image")
-            renamed_output = run_dir / "results" / "images" / (
-                "002800_add_renamed.png_output.png"
+            renamed_output = (
+                run_dir / "results" / "images" / ("002800_add_renamed.png_output.png")
             )
             renamed_output.parent.mkdir(parents=True)
             renamed_output.write_bytes(b"image")
@@ -58,9 +58,7 @@ class CompBenchIncompleteTests(unittest.TestCase):
                 },
             ]
 
-            incomplete = find_incomplete_compbench_samples(
-                records, results, run_dir
-            )
+            incomplete = find_incomplete_compbench_samples(records, results, run_dir)
 
         self.assertEqual(
             incomplete,
@@ -95,7 +93,9 @@ class CompBenchIncompleteTests(unittest.TestCase):
                 read_sample_indices(path, records)
 
             path.write_text("2761\n", encoding="utf-8")
-            with self.assertRaisesRegex(ValueError, "not present in the annotation file"):
+            with self.assertRaisesRegex(
+                ValueError, "not present in the annotation file"
+            ):
                 read_sample_indices(path, records)
 
     def test_rejects_empty_sample_list(self):

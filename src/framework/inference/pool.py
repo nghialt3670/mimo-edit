@@ -8,16 +8,13 @@ from typing import TYPE_CHECKING, Any
 
 import torch
 
-from framework.inference.external.objectclear.pipelines.pipeline_objectclear import (
-    ObjectClearPipeline,
-)
 from framework.utils.randomness import seed_random_generators
 
 from .config import InferenceConfig
 from .utils import get_device, torch_dtype
 
 if TYPE_CHECKING:
-    from diffusers import Flux2KleinPipeline
+    from diffusers import Flux2KleinInpaintPipeline, Flux2KleinPipeline
     from transformers import (
         GroundingDinoForObjectDetection,
         GroundingDinoProcessor,
@@ -26,7 +23,6 @@ if TYPE_CHECKING:
         Sam3TrackerModel,
         Sam3TrackerProcessor,
     )
-
     from .external.objectclear.pipelines.pipeline_objectclear import ObjectClearPipeline
 
 
@@ -45,16 +41,20 @@ class GroundingDinoPipelines:
 
 
 class ModelPool:
-    """Share one cached instance of each model pipeline.
+    """Lazily load and cache model pipelines.
 
-    Pipelines are loaded on first access.
+    ``flux2_klein_inpaint_pipeline`` and ``flux2_klein_pipeline`` share their
+    underlying model components. Do not call them concurrently or move one
+    of the pipelines to another dtype/device without considering both.
 
     Public attributes:
-        flux2_klein_pipeline          - regular image editing
-        mice_pipeline                 - MICE spatially constrained Klein editing
-        sam3_pipelines                - text and point/box segmentation
-        grounding_dino_pipelines      - phrase grounding for region segmentation
-        object_clear_pipeline         - object removal
+        flux2_klein_pipeline         - ordinary Klein image editing
+        flux2_klein_inpaint_pipeline - masked Klein inpainting / object removal
+        mice_pipeline                - MICE spatially constrained Klein editing
+        sam3_pipelines               - text and point/box segmentation
+        grounding_dino_pipelines     - phrase grounding for segmentation
+        object_clear_pipeline        - independent ObjectClear object removal
+        pctnet_pipeline              - optional color harmonization
     """
 
     FLUX2_KLEIN_MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
@@ -66,12 +66,11 @@ class ModelPool:
         seed_random_generators()
         self.config = config if config is not None else InferenceConfig()
         self.device = get_device()
-        # self._pipelines = (
-        #     self.flux2_klein_pipeline,
-        #     self.sam3_pipelines,
-        #     self.object_clear_pipeline,
-        #     self.grounding_dino_pipelines,
-        # )
+        self._pipelines = {
+            self.flux2_klein_pipeline,
+            self.flux2_klein_inpaint_pipeline,
+            self.sam3_pipelines,
+        }
 
     @cached_property
     def flux2_klein_pipeline(self) -> Flux2KleinPipeline:
@@ -84,17 +83,53 @@ class ModelPool:
             ),
             low_cpu_mem_usage=True,
         )
-        # The 4-step Klein 4B checkpoint is distilled (no classifier-free guidance).
+        # black-forest-labs/FLUX.2-klein-4B is the four-step distilled model.
         pipe.register_to_config(is_distilled=True)
         return pipe.to(self.device)
 
     @cached_property
-    def mice_pipeline(self) -> Any:
-        """Load MICE's *custom* Klein pipeline once, on first use.
+    def flux2_klein_inpaint_pipeline(self) -> Flux2KleinInpaintPipeline:
+        """Create an inpaint pipeline without downloading a second Klein model.
 
-        MICE cannot share the ordinary Diffusers Klein pipeline directly because
-        it installs custom attention processors. This loads separate model weights.
+        Use the concrete class, not AutoPipelineForInpainting: current Diffusers
+        AutoPipeline's inpaint mapping does not include FLUX.2 Klein.
+        ``from_pipe`` shares the already-loaded weights and only constructs a
+        new pipeline wrapper (including its mask processor).
         """
+        try:
+            from diffusers import Flux2KleinInpaintPipeline
+        except ImportError as exc:
+            raise RuntimeError(
+                "Your Diffusers installation does not provide "
+                "Flux2KleinInpaintPipeline. Install a version that contains "
+                "this class (the current Diffusers source branch does)."
+            ) from exc
+
+        editing_pipe = self.flux2_klein_pipeline
+        model_dtype = editing_pipe.transformer.dtype
+        is_distilled = bool(editing_pipe.config.is_distilled)
+
+        # Passing dtype is essential: DiffusionPipeline.from_pipe() can otherwise
+        # default to float32 and convert the SHARED model components in-place.
+        inpaint_pipe = Flux2KleinInpaintPipeline.from_pipe(
+            editing_pipe,
+            dtype=model_dtype,
+            is_distilled=is_distilled,
+        )
+
+        for component in ("transformer", "vae", "text_encoder", "tokenizer", "scheduler"):
+            if getattr(inpaint_pipe, component) is not getattr(editing_pipe, component):
+                raise RuntimeError(
+                    f"Klein inpaint initialization did not share '{component}' "
+                    "with the editing pipeline. Refusing to use unexpected copies."
+                )
+        if bool(inpaint_pipe.config.is_distilled) != is_distilled:
+            raise RuntimeError("Klein inpaint pipeline lost its distilled/base configuration")
+        return inpaint_pipe
+
+    @cached_property
+    def mice_pipeline(self) -> Any:
+        """MICE uses custom attention processors and requires separate weights."""
         from .external.mice_adapter import load_mice_pipeline
 
         return load_mice_pipeline(
@@ -109,10 +144,7 @@ class ModelPool:
     def pctnet_pipeline(self):
         from .external.pctnet_harmonization import load_pctnet
 
-        return load_pctnet(
-            device="cpu",
-            variant="CNN",
-        )
+        return load_pctnet(device="cpu", variant="CNN")
 
     @cached_property
     def sam3_pipelines(self) -> Sam3Pipelines:

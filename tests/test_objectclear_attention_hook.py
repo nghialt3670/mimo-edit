@@ -61,7 +61,7 @@ class FakeUnet:
     def named_modules(self):
         return [
             ("down_blocks.1.attentions.0", self.transformer),
-            ("down_blocks.1.attentions.0.transformer_blocks.0.attn2", self.attention)
+            ("down_blocks.1.attentions.0.transformer_blocks.0.attn2", self.attention),
         ]
 
 

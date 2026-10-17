@@ -26,7 +26,9 @@ class WholeBoxEditTests(unittest.TestCase):
             crops.append(crop.size)
             return Image.new("RGB", crop.size, "red")
 
-        with patch("framework.inference.flux2_klein._generate_klein_edit", fake):
+        with patch(
+            "framework.inference.flux2_klein.edit_object.generate_klein_edit", fake
+        ):
             result = flux2_klein_edit_object(
                 self.pool,
                 self.image,
