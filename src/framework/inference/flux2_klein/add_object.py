@@ -15,11 +15,10 @@ from ..pool import ModelPool
 from .utils import (
     PADDING_FRAC,
     WORK_SIZE,
+    binary_mask,
+    blend_edit,
     edge_padded_crop,
-    feather_mask,
     generate_klein_edit,
-    harmonize_changed_region,
-    harmonize_with_mask,
 )
 
 
@@ -31,9 +30,10 @@ def flux2_klein_add_object_with_box(
     *,
     harmonize: bool = True,
 ) -> Image.Image:
-    """Add an object near an XYXY pixel box and paste the entire edited crop.
+    """Add an object near an XYXY pixel box.
 
-    With ``harmonize``, PCT-Net harmonizes the pixels that changed inside the box.
+    Klein edits the box crop; ``blend_edit`` then pastes back only the pixels it
+    changed (the new object), harmonized with PCT-Net (``harmonize``) with a per-pixel alpha.
     """
     pipe = pool.flux2_klein_pipeline
     if not isinstance(image, Image.Image):
@@ -78,10 +78,13 @@ def flux2_klein_add_object_with_box(
         )
     if edited.size != (ww, wh):
         raise ValueError(f"Klein returned {edited.size}, expected {(ww, wh)}")
-    blended = Image.composite(
-        edited.resize((cw, ch), Image.Resampling.LANCZOS),
+    edited = edited.resize((cw, ch), Image.Resampling.LANCZOS)
+    blended = blend_edit(
         cropped,
-        feather_mask((cw, ch)),
+        edited,
+        minimum=np.zeros((ch, cw), bool),
+        limit=np.ones((ch, cw), bool),
+        predictor=pool.pctnet_pipeline if harmonize else None,
     )
     cx1, cy1, cx2, cy2 = crop_box
     vx1, vy1 = max(cx1, 0), max(cy1, 0)
@@ -91,10 +94,6 @@ def flux2_klein_add_object_with_box(
         blended.crop((vx1 - cx1, vy1 - cy1, vx2 - cx1, vy2 - cy1)),
         (vx1, vy1),
     )
-    if harmonize:
-        return harmonize_changed_region(
-            pool.pctnet_pipeline, original, result, (x1, y1, x2, y2)
-        )
     return result
 
 
@@ -106,9 +105,11 @@ def flux2_klein_add_object_with_mask(
     *,
     harmonize: bool = True,
 ) -> Image.Image:
-    """Generate inside a white mask, preserving every pixel outside the mask.
+    """Add an object at a white mask.
 
-    With ``harmonize``, PCT-Net harmonizes the masked region.
+    Klein edits a crop around the mask; ``blend_edit`` then pastes back the mask
+    plus any significant change connected to it, harmonized with PCT-Net
+    (``harmonize``) with a per-pixel alpha.
     """
     if not isinstance(image, Image.Image) or not isinstance(mask, Image.Image):
         raise TypeError("image and mask must both be PIL images")
@@ -117,10 +118,7 @@ def flux2_klein_add_object_with_mask(
     if mask.size != image.size:
         raise ValueError("mask must have the same size as image")
     original = image.convert("RGB")
-    mask = mask.convert("L")
-    if mask.getextrema()[1] <= 1:
-        mask = mask.point(lambda value: value * 255)
-    mask = mask.point(lambda value: 255 if value >= 128 else 0)
+    mask = Image.fromarray(binary_mask(mask).astype(np.uint8) * 255, "L")
     region = mask.getbbox()
     if region is None:
         raise ValueError("mask is empty")
@@ -143,10 +141,15 @@ def flux2_klein_add_object_with_mask(
     )
     if edited.size != working_image.size:
         edited = edited.resize(working_image.size, Image.Resampling.LANCZOS)
-    crop_mask = mask.crop(crop_box)
-    edited_crop = edited.resize(original_crop.size, Image.Resampling.LANCZOS)
+    edited = edited.resize(original_crop.size, Image.Resampling.LANCZOS)
+    object_mask = binary_mask(mask.crop(crop_box))
+    blended = blend_edit(
+        original_crop,
+        edited,
+        minimum=object_mask,
+        limit=np.ones_like(object_mask),
+        predictor=pool.pctnet_pipeline if harmonize else None,
+    )
     result = original.copy()
-    result.paste(edited_crop, crop_box[:2], crop_mask)
-    if harmonize:
-        return harmonize_with_mask(pool.pctnet_pipeline, result, mask)
+    result.paste(blended, crop_box[:2])
     return result

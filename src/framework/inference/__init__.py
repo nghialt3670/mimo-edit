@@ -1,4 +1,6 @@
+from .birefnet import birefnet_alpha_matte
 from .config import (
+    BiRefNetInferenceConfig,
     GroundingDinoInferenceConfig,
     InferenceConfig,
     KleinInferenceConfig,
@@ -18,6 +20,8 @@ from .pool import ModelPool
 from .sam3 import sam3_segment_mask, sam3_segment_masks
 
 __all__ = [
+    "BiRefNetInferenceConfig",
+    "birefnet_alpha_matte",
     "InferenceConfig",
     "GroundingDinoInferenceConfig",
     "KleinInferenceConfig",

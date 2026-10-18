@@ -2,9 +2,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-import numpy as np
 from PIL import Image
-from scipy.ndimage import maximum_filter
 
 from framework.inference import flux2_klein_edit_object
 
@@ -17,18 +15,6 @@ from ..utils import (
     validate_number_range,
     validate_text,
 )
-
-MASK_EXPAND_RATIO = 0.05
-
-
-def _expanded_mask(mask: Image.Image, ratio: float = MASK_EXPAND_RATIO) -> Image.Image:
-    """Dilate the mask by a fraction of its bounding box's longer side."""
-    binary = mask.convert("L").point(lambda v: 255 if v >= 128 else 0)
-    left, top, right, bottom = binary.getbbox()
-    radius = max(1, round(max(right - left, bottom - top) * ratio))
-    return Image.fromarray(
-        maximum_filter(np.asarray(binary), size=2 * radius + 1, mode="constant", cval=0)
-    )
 
 
 def _validate_edit_object_args(
@@ -55,7 +41,7 @@ def _validate_edit_object_args(
         "mask": {"type": "image", "description": "Mask selecting the object to edit."},
         "prompt": {
             "type": "string",
-            "description": "Describe the intended change and preserve details the user did not ask to change.",
+            "description": "Describe the intended change and preserve details the user did not ask to change. For color changes say to keep the texture, material and lighting.",
         },
         "mode": {
             "type": "string",
@@ -83,9 +69,8 @@ def edit_object(
     return flux2_klein_edit_object(
         ctx.model_pool,
         image,
-        _expanded_mask(mask),
+        mask,
         prompt,
         mode=mode,
         padding=padding,
-        whole_box=True,
     )

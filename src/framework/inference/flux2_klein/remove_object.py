@@ -130,8 +130,8 @@ def flux2_klein_remove_object(
     mask: Image.Image,
     *,
     protection_mask: Image.Image | None = None,
-    context_padding: float = 1,
-    mask_padding_ratio: float = 0,
+    context_padding: float = 1.5,
+    mask_padding_ratio: float = 0.05,
     prompt: str = REMOVE_PROMPT,
     highlight_opacity: float = 0.65,
     lora_scale: float = 1.3,
@@ -139,7 +139,7 @@ def flux2_klein_remove_object(
     lora_weight: str = OBJECT_REMOVE_LORA_WEIGHT,
     feather_px: int = 24,
     harmonize: bool = False,
-    include_shadow: bool = True,
+    include_shadow: bool = False,
     seed: int | None = None,
 ) -> Image.Image:
     """Remove the white region of ``mask``.

@@ -103,11 +103,10 @@ Review each checkpoint's license before use.
 
 `edit_object` requires one of three modes:
 
-- `local`: make appearance-only edits such as color, material, or pattern; preserve the object's silhouette and composite within its mask at full edit strength, with a soft transition outside the mask.
-- `regional`: permit additions and shape/size changes within an expanded neighborhood. The model sees a crop with padding around the object, and the dilated mask neighborhood is composited at full edit strength with a softly feathered transition beyond it. `padding` defaults to `0.25`, meaning 25% of the mask bounding-box width and height on each side; use this for edits like adding a hat.
+- `local`: make appearance-only edits such as color, material, or pattern; preserve the object's silhouette. The model sees the object with some context.
+- `regional`: permit additions and shape/size changes within an expanded neighborhood. The model sees a crop with padding around the object. `padding` defaults to `0.25`, meaning 25% of the mask bounding-box width and height on each side; use this for edits like adding a hat.
+- For `local` and `regional`, the pasted region is the original mask plus any significant change the model made that touches it (found by a noise-aware before/after color difference) inside that neighborhood, feathered at the edge; the rest of the image stays original.
 - `global`: send the whole image to the model and return its full result, without mask compositing. Use this when surrounding scene changes are intended; unrelated areas may also change.
-
-Set `whole_box=True` (local or regional) to send the whole bounding box of the mask (padded in regional mode) to the model and paste the entire edited box back, with softened edges, instead of only the mask area. It is ignored in `global` mode.
 
 Example: `tool_dict["edit_object"](image=image, mask=mask, prompt="add a hat", mode="regional", padding=0.25)`.
 

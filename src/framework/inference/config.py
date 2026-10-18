@@ -73,6 +73,17 @@ class ObjectClearInferenceConfig:
 
 
 @dataclass(frozen=True)
+class BiRefNetInferenceConfig:
+    """Inference settings for the fixed BiRefNet HR-Matting model."""
+
+    # The model was trained at 2048x2048; lower it only to save memory.
+    resolution: int = 2048
+
+    def __post_init__(self) -> None:
+        validate_positive_integer("birefnet.resolution", self.resolution)
+
+
+@dataclass(frozen=True)
 class InferenceConfig:
     """Inference settings for the fixed image-editing and segmentation backbones."""
 
@@ -84,6 +95,7 @@ class InferenceConfig:
     object_clear: ObjectClearInferenceConfig = field(
         default_factory=ObjectClearInferenceConfig
     )
+    birefnet: BiRefNetInferenceConfig = field(default_factory=BiRefNetInferenceConfig)
     low_vram: bool = False
 
     def __post_init__(self) -> None:
@@ -92,6 +104,7 @@ class InferenceConfig:
             ("sam3", self.sam3, Sam3InferenceConfig),
             ("grounding_dino", self.grounding_dino, GroundingDinoInferenceConfig),
             ("object_clear", self.object_clear, ObjectClearInferenceConfig),
+            ("birefnet", self.birefnet, BiRefNetInferenceConfig),
         ):
             if not isinstance(value, config_type):
                 raise TypeError(f"{name} must be a {config_type.__name__}")

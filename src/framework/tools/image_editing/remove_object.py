@@ -30,6 +30,4 @@ def remove_object(
     ctx: ToolContext, image: Image.Image, mask: Image.Image
 ) -> Image.Image:
     _validate_remove_object_args(image, mask)
-    return flux2_klein_remove_object(
-        ctx.model_pool, image, mask
-    )
+    return flux2_klein_remove_object(ctx.model_pool, image, mask)

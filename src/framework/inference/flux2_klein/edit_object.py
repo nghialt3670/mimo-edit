@@ -5,15 +5,32 @@ from __future__ import annotations
 from typing import Literal
 
 import numpy as np
-from PIL import Image, ImageChops, ImageFilter
-from scipy.ndimage import maximum_filter
+from PIL import Image
 
+from ..birefnet import birefnet_alpha_matte
 from ..pool import ModelPool
 from ..utils import validate_number_range
 from .utils import (
-    feather_mask,
+    binary_mask,
+    blend_edit,
+    feather_radius,
     generate_klein_edit,
+    grow,
     harmonize_with_mask,
+)
+
+# Context Klein sees around the object in local mode (fraction of the bbox, >= 16px).
+LOCAL_CONTEXT = 0.2
+
+
+# Distilled Klein follows short, positive descriptions better than "don't" lists.
+# Kept generic: the wording must work for any object and any kind of edit.
+COMPLETE_AND_REALISTIC = (
+    "Apply the change to every part of the object, including thin or small "
+    "parts. When changing only color, keep the same surface: recolor its "
+    "existing material, texture, shading, highlights and shadows, and keep the "
+    "original brightness and lighting, instead of painting a flat or glowing "
+    "color over it."
 )
 
 
@@ -26,14 +43,15 @@ def _editing_prompt(
         instructions = (
             "Edit only the selected object's appearance. Preserve its identity, "
             "silhouette, geometry, size, position, and pose. Do not add or remove "
-            "parts. Keep everything outside the selected object unchanged."
+            "parts. Keep everything outside the selected object unchanged. "
+            + COMPLETE_AND_REALISTIC
         )
     elif mode == "regional":
         instructions = (
             "Edit the selected object and allow the requested change to extend into "
             "the padded area around it, including changes to its silhouette, size, "
             "or additions such as accessories. Keep image content outside that "
-            "nearby edit area unchanged."
+            "nearby edit area unchanged. " + COMPLETE_AND_REALISTIC
         )
     else:
         instructions = (
@@ -53,18 +71,21 @@ def flux2_klein_edit_object(
     *,
     mode: Literal["local", "regional", "global"] = "local",
     padding: float = 0.2,
-    harmonize: bool = False,
-    whole_box: bool = False,
+    harmonize: bool = True,
+    matting: bool = True,
+    refine_leakage: bool = False,
+    debug: dict | None = None,
 ) -> Image.Image:
-    """Edit one masked object and feather the local/regional composite boundary.
+    """Edit one masked object with Klein and paste back only what changed.
 
-    With ``whole_box`` (local/regional only), Klein edits the whole bounding box
-    of the mask (padded by ``padding`` in regional mode) and the entire edited
-    box is pasted back with softened edges instead of only the mask area.
+    - ``global``: the whole image goes to Klein and its result is returned.
+    - ``local`` / ``regional``: Klein edits a crop around the object (extra
+      context in local mode, ``padding`` of the bbox in regional mode), then
+      ``blend_edit`` pastes it back: the paste region is the object mask plus any
+      significant change connected to it inside that neighborhood, harmonized
+      with PCT-Net (``harmonize``) and pasted with a per-pixel alpha. Pixels elsewhere stay
+      original.
 
-    With ``harmonize`` PCT-Net harmonizes only the object mask region of the
-    edited result. It runs before the feathered composite, so the box or
-    feathered halo around the mask is never harmonized.
     """
     if not isinstance(image, Image.Image):
         raise TypeError("image must be a Pillow image")
@@ -82,87 +103,52 @@ def flux2_klein_edit_object(
     if bounds is None:
         raise ValueError("mask is empty")
     left, top, right, bottom = bounds
+    width, height = right - left, bottom - top
+
     current = image.convert("RGB")
     instruction = _editing_prompt(prompt, mode, bounds)
     pipeline = pool.flux2_klein_pipeline
     config = pool.config.klein
+
     if mode == "global":
         edited = generate_klein_edit(pipeline, current, instruction, config)
         if edited.size != current.size:
             edited = edited.resize(current.size, Image.Resampling.LANCZOS)
-        edited = edited.convert("RGB")
         if harmonize:
             edited = harmonize_with_mask(pool.pctnet_pipeline, edited, mask)
         return edited
+
+    # Neighborhood in which Klein's changes may be pasted back.
     if mode == "regional":
-        padding_x = round((right - left) * padding)
-        padding_y = round((bottom - top) * padding)
-        allowed_mask = Image.fromarray(
-            maximum_filter(
-                np.asarray(mask),
-                size=(padding_y * 2 + 1, padding_x * 2 + 1),
-                mode="constant",
-                cval=0,
-            )
-        )
+        margin_x, margin_y = round(width * padding), round(height * padding)
     else:
-        padding_x = max(16, round((right - left) * 0.2))
-        padding_y = max(16, round((bottom - top) * 0.2))
-        allowed_mask = mask
-    if whole_box and mode != "global":
-        box_bounds = allowed_mask.getbbox()
-        if box_bounds is None:
-            raise ValueError("mask is empty")
-        box_left, box_top, box_right, box_bottom = box_bounds
-        if mode == "regional":
-            box_bounds = (
-                max(0, box_left),
-                max(0, box_top),
-                min(image.width, box_right),
-                min(image.height, box_bottom),
-            )
-        original_crop = current.crop(box_bounds)
-        edited_crop = generate_klein_edit(pipeline, original_crop, instruction, config)
-        if edited_crop.size != original_crop.size:
-            edited_crop = edited_crop.resize(
-                original_crop.size, Image.Resampling.LANCZOS
-            )
-        if harmonize:
-            edited_crop = harmonize_with_mask(
-                pool.pctnet_pipeline, edited_crop, mask.crop(box_bounds)
-            )
-        current.paste(
-            Image.composite(
-                edited_crop, original_crop, feather_mask(original_crop.size)
-            ),
-            box_bounds[:2],
-        )
-        return current
-    feather_radius = min(12.0, max(2.0, min(right - left, bottom - top) * 0.04))
-    feather_support = int(np.ceil(feather_radius * 3))
-    allowed_bounds = allowed_mask.getbbox()
-    if allowed_bounds is None:
-        raise ValueError("mask is empty")
-    allowed_left, allowed_top, allowed_right, allowed_bottom = allowed_bounds
-    crop_padding_x = feather_support + (padding_x if mode == "local" else 0)
-    crop_padding_y = feather_support + (padding_y if mode == "local" else 0)
+        margin_x = max(16, round(width * LOCAL_CONTEXT))
+        margin_y = max(16, round(height * LOCAL_CONTEXT))
+    feather = feather_radius(width, height)
+    support = int(np.ceil(feather * 3))
     crop_box = (
-        max(0, allowed_left - crop_padding_x),
-        max(0, allowed_top - crop_padding_y),
-        min(image.width, allowed_right + crop_padding_x),
-        min(image.height, allowed_bottom + crop_padding_y),
+        max(0, left - margin_x - support),
+        max(0, top - margin_y - support),
+        min(image.width, right + margin_x + support),
+        min(image.height, bottom + margin_y + support),
     )
-    original_crop = current.crop(crop_box)
-    feathered_mask = allowed_mask.filter(
-        ImageFilter.GaussianBlur(radius=feather_radius)
+
+    before = current.crop(crop_box)
+    after = generate_klein_edit(pipeline, before, instruction, config)
+    if after.size != before.size:
+        after = after.resize(before.size, Image.Resampling.LANCZOS)
+
+    object_mask = binary_mask(mask.crop(crop_box))
+    blended = blend_edit(
+        before,
+        after,
+        minimum=object_mask,
+        limit=grow(object_mask, margin_x, margin_y),
+        predictor=pool.pctnet_pipeline if harmonize else None,
+        matter=(lambda image: birefnet_alpha_matte(pool, image)) if matting else None,
+        refine_leakage=refine_leakage,
+        reach=max(6.0, 0.05 * min(width, height)) if mode == "local" else None,
+        debug=debug,
     )
-    composite_mask = ImageChops.lighter(allowed_mask, feathered_mask)
-    edited_crop = generate_klein_edit(pipeline, original_crop, instruction, config)
-    if edited_crop.size != original_crop.size:
-        edited_crop = edited_crop.resize(original_crop.size, Image.Resampling.LANCZOS)
-    if harmonize:
-        edited_crop = harmonize_with_mask(
-            pool.pctnet_pipeline, edited_crop, mask.crop(crop_box)
-        )
-    current.paste(edited_crop, crop_box[:2], composite_mask.crop(crop_box))
+    current.paste(blended, crop_box[:2])
     return current

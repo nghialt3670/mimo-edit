@@ -40,6 +40,17 @@ class FindShadowMaskTest(unittest.TestCase):
         self.assertTrue(result[120, 90] > 0)
         self.assertEqual(result[10, 170], 0)
 
+    def test_large_scene_shadow_touching_object_is_rejected(self):
+        image, obj = _scene()
+        scene = np.zeros((200, 200), np.uint8)
+        scene[90:200, 0:200] = 255  # huge shadow that merely touches the object
+        with patch.object(
+            shadow, "sam3_segment_masks", return_value=[Image.fromarray(scene)]
+        ):
+            plain = Image.fromarray(np.full((200, 200, 3), 150, np.uint8))
+            result = shadow.find_shadow_mask(None, plain, obj)
+        self.assertEqual(result.max(), 0)
+
     def test_oversized_shadow_is_ignored(self):
         image, obj = _scene()
         huge = np.full((200, 200), 255, np.uint8)

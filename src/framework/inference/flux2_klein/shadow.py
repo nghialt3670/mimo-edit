@@ -11,9 +11,12 @@ from ..sam3 import sam3_segment_masks
 
 SHADOW_PROMPT = "shadow"
 MIN_SHADOW_CONFIDENCE = 0.3
-# A "shadow" much larger than the object is almost surely a misdetection
-# (e.g. a dark floor), so it is ignored instead of erased.
-MAX_AREA_RATIO = 3.0
+# A shadow bigger than the object is a scene shadow (e.g. a bench's), not its own.
+MAX_AREA_RATIO = 1.0
+# The object's own shadow lies within this distance of its bbox (fraction of size).
+WINDOW_RATIO = 0.35
+# A SAM3 segment with more than this share outside the window is a scene shadow.
+MAX_OUTSIDE_SHARE = 0.25
 
 
 def _dilate(mask: np.ndarray, radius: int) -> np.ndarray:
@@ -36,8 +39,9 @@ def _touching_components(candidate: np.ndarray, near: np.ndarray) -> np.ndarray:
 
 
 def _sam3_shadow(
-    pool: ModelPool, crop: Image.Image, near: np.ndarray, max_area: float
+    pool: ModelPool, crop: Image.Image, near: np.ndarray, window: np.ndarray
 ) -> np.ndarray:
+    """Union of SAM3 "shadow" segments that touch the object and stay local to it."""
     try:
         masks = sam3_segment_masks(
             pool, crop, SHADOW_PROMPT, min_confidence=MIN_SHADOW_CONFIDENCE
@@ -47,13 +51,16 @@ def _sam3_shadow(
     union = np.zeros(near.shape, bool)
     for mask in masks:
         array = np.asarray(mask.convert("L")) > 127
-        if array.shape == near.shape and (array & (near > 0)).any():
-            union |= array
-    return union if union.sum() <= max_area else np.zeros(near.shape, bool)
+        if array.shape != near.shape or not (array & (near > 0)).any():
+            continue
+        outside = (array & ~window).sum() / max(1, array.sum())
+        if outside <= MAX_OUTSIDE_SHARE:
+            union |= array & window
+    return union
 
 
 def _heuristic_shadow(
-    crop: Image.Image, obj: np.ndarray, near: np.ndarray, size: int, max_area: float
+    crop: Image.Image, obj: np.ndarray, near: np.ndarray, size: int, window: np.ndarray
 ) -> np.ndarray:
     """Pixels clearly darker than their surroundings that touch the object."""
     lightness = cv2.cvtColor(np.asarray(crop), cv2.COLOR_RGB2LAB)[..., 0].astype(
@@ -67,8 +74,7 @@ def _heuristic_shadow(
         np.uint8
     )
     dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
-    shadow = _touching_components(dark, near)
-    return shadow if shadow.sum() <= max_area else np.zeros(obj.shape, bool)
+    return _touching_components(dark, near) & window
 
 
 def find_shadow_mask(
@@ -76,7 +82,8 @@ def find_shadow_mask(
 ) -> np.ndarray:
     """Return a 0/255 mask of the object's shadow inside ``crop``.
 
-    SAM3 segments "shadow" and keeps the segments touching the object. When
+    SAM3 segments "shadow" and keeps segments that touch the object and stay
+    within a window around it (large scene shadows are rejected). When
     SAM3 finds none, a luminance heuristic picks dark pixels next to the object.
     The result excludes the object itself and may be empty.
     """
@@ -87,10 +94,20 @@ def find_shadow_mask(
     size = max(xs.max() - xs.min() + 1, ys.max() - ys.min() + 1)
     touch = max(3, round(size * 0.03))
     near = _dilate(obj, touch)
-    max_area = MAX_AREA_RATIO * float(obj.sum())
+    window = np.zeros(obj.shape, bool)
+    window[
+        max(0, ys.min() - round(size * WINDOW_RATIO)) : ys.max()
+        + round(size * WINDOW_RATIO)
+        + 1,
+        max(0, xs.min() - round(size * WINDOW_RATIO)) : xs.max()
+        + round(size * WINDOW_RATIO)
+        + 1,
+    ] = True
 
-    shadow = _sam3_shadow(pool, crop, near, max_area)
+    shadow = _sam3_shadow(pool, crop, near, window)
     if not shadow.any():
-        shadow = _heuristic_shadow(crop, obj, near, int(size), max_area)
+        shadow = _heuristic_shadow(crop, obj, near, int(size), window)
     shadow &= obj == 0
+    if shadow.sum() > MAX_AREA_RATIO * float(obj.sum()):
+        return np.zeros(obj.shape, np.uint8)
     return _dilate(shadow.astype(np.uint8), touch) * 255

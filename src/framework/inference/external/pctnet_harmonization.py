@@ -35,7 +35,7 @@ DEFAULT_UPSTREAM = Path(__file__).resolve().parent / "pctnet_upstream"
 def load_pctnet(
     *,
     device: str = "mps",
-    variant: str = "CNN",
+    variant: str = "ViT",
     upstream_dir: str | Path = DEFAULT_UPSTREAM,
 ):
     """Load an official pretrained PCT-Net Predictor (reuse across calls)."""

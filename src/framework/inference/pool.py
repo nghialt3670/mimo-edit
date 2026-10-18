@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         Sam3TrackerModel,
         Sam3TrackerProcessor,
     )
+
     from .external.objectclear.pipelines.pipeline_objectclear import ObjectClearPipeline
 
 
@@ -61,6 +62,7 @@ class ModelPool:
     SAM3_MODEL_ID = "facebook/sam3"
     GROUNDING_DINO_MODEL_ID = "IDEA-Research/grounding-dino-tiny"
     OBJECT_CLEAR_MODEL_ID = "jixin0101/ObjectClear"
+    BIREFNET_MATTING_MODEL_ID = "ZhengPeng7/BiRefNet_HR-matting"
 
     def __init__(self, config: InferenceConfig | None = None) -> None:
         seed_random_generators()
@@ -117,14 +119,22 @@ class ModelPool:
             is_distilled=is_distilled,
         )
 
-        for component in ("transformer", "vae", "text_encoder", "tokenizer", "scheduler"):
+        for component in (
+            "transformer",
+            "vae",
+            "text_encoder",
+            "tokenizer",
+            "scheduler",
+        ):
             if getattr(inpaint_pipe, component) is not getattr(editing_pipe, component):
                 raise RuntimeError(
                     f"Klein inpaint initialization did not share '{component}' "
                     "with the editing pipeline. Refusing to use unexpected copies."
                 )
         if bool(inpaint_pipe.config.is_distilled) != is_distilled:
-            raise RuntimeError("Klein inpaint pipeline lost its distilled/base configuration")
+            raise RuntimeError(
+                "Klein inpaint pipeline lost its distilled/base configuration"
+            )
         return inpaint_pipe
 
     @cached_property
@@ -145,6 +155,16 @@ class ModelPool:
         from .external.pctnet_harmonization import load_pctnet
 
         return load_pctnet(device="cpu", variant="CNN")
+
+    @cached_property
+    def birefnet_matting_model(self):
+        from transformers import AutoModelForImageSegmentation
+
+        torch.set_float32_matmul_precision("high")
+        model = AutoModelForImageSegmentation.from_pretrained(
+            self.BIREFNET_MATTING_MODEL_ID, trust_remote_code=True
+        )
+        return model.to(self.device, torch_dtype(self.device)).eval()
 
     @cached_property
     def sam3_pipelines(self) -> Sam3Pipelines:

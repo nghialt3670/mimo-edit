@@ -18,12 +18,19 @@ def _pool(pipe=None, **config):
     )
 
 
+def _red_square():
+    edited = Image.new("RGB", (48, 48), "black")
+    edited.paste((255, 0, 0), (10, 10, 40, 40))
+    return edited
+
+
 class Flux2KleinAddTests(unittest.TestCase):
     def test_mask_add_resizes_slightly_mismatched_model_output(self):
         image = Image.new("RGB", (200, 160), "black")
         mask = Image.new("L", image.size, 0)
         mask.paste(255, (50, 40, 80, 70))
-        edited = Image.new("RGB", (48, 48), "red")
+        edited = Image.new("RGB", (48, 48), "black")
+        edited.paste((255, 0, 0), (10, 10, 40, 40))  # mask area inside the crop
 
         with patch(
             "framework.inference.flux2_klein.add_object.generate_klein_edit",
@@ -39,9 +46,10 @@ class Flux2KleinAddTests(unittest.TestCase):
 
         self.assertEqual(result.size, image.size)
         self.assertEqual(result.getpixel((60, 50)), (255, 0, 0))
-        self.assertEqual(result.getpixel((49, 50)), (0, 0, 0))
+        self.assertEqual(result.getpixel((45, 50)), (0, 0, 0))
+        self.assertEqual(result.getpixel((100, 100)), (0, 0, 0))
 
-    def test_mask_add_harmonizes_only_the_mask(self):
+    def test_mask_add_harmonizes_the_diff_region(self):
         image = Image.new("RGB", (200, 160), "black")
         mask = Image.new("L", image.size, 0)
         mask.paste(255, (50, 40, 80, 70))
@@ -50,7 +58,7 @@ class Flux2KleinAddTests(unittest.TestCase):
         with (
             patch(
                 "framework.inference.flux2_klein.add_object.generate_klein_edit",
-                return_value=Image.new("RGB", (48, 48), "red"),
+                return_value=_red_square(),
             ),
             patch(
                 "framework.inference.external.pctnet_harmonization.harmonize_pctnet",
@@ -61,9 +69,12 @@ class Flux2KleinAddTests(unittest.TestCase):
 
         harmonize.assert_called_once()
         self.assertIs(harmonize.call_args.args[0], pool.pctnet_pipeline)
-        self.assertEqual(harmonize.call_args.args[2].getbbox(), (50, 40, 80, 70))
+        # Harmonization runs in crop coordinates (crop origin is (40, 30)).
+        left, top, right, bottom = harmonize.call_args.args[2].getbbox()
+        self.assertLessEqual((left, top), (10, 10))
+        self.assertGreaterEqual((right, bottom), (40, 40))
 
-    def test_box_add_harmonizes_changed_pixels_in_box(self):
+    def test_box_add_harmonizes_diff_region_in_box(self):
         from framework.inference.flux2_klein import flux2_klein_add_object_with_box
 
         image = Image.new("RGB", (64, 64), "black")
@@ -82,7 +93,8 @@ class Flux2KleinAddTests(unittest.TestCase):
         mask = harmonize.call_args.args[2]
         self.assertIsNotNone(mask.getbbox())
         left, top, right, bottom = mask.getbbox()
-        self.assertTrue(16 <= left and top >= 16 and right <= 48 and bottom <= 48)
+        # Crop coordinates: the crop is the 32x32 box.
+        self.assertTrue(left >= 0 and top >= 0 and right <= 32 and bottom <= 32)
 
     def test_harmonize_false_skips_pctnet(self):
         image = Image.new("RGB", (64, 64), "black")
