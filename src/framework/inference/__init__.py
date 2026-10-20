@@ -11,6 +11,7 @@ from .flux2_klein import (
     flux2_klein_add_object_with_mask,
     flux2_klein_edit_object,
     flux2_klein_remove_object,
+    flux2_klein_replace_object,
 )
 from .grounding_dino import grounding_dino_segment_region
 from .mice import mice_add_object_with_box
@@ -32,6 +33,7 @@ __all__ = [
     "flux2_klein_add_object_with_mask",
     "flux2_klein_edit_object",
     "flux2_klein_remove_object",
+    "flux2_klein_replace_object",
     "grounding_dino_segment_region",
     "mice_add_object_with_box",
     "object_clear_remove_object",

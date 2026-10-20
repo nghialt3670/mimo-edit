@@ -30,6 +30,7 @@ from framework.inference.flux2_klein import (
     flux2_klein_add_object_with_box,
     flux2_klein_add_object_with_mask,
     flux2_klein_remove_object,
+    flux2_klein_replace_object,
 )
 from framework.inference.flux2_klein.placement import describe_anchor
 from framework.inference.flux2_klein.utils import NothingAdded
@@ -130,13 +131,17 @@ def run_case(
         mask.paste(255, box)
 
     base = source
-    if case.remove_first:
+    if case.remove_first and args.replace_mode == "two-step":
         start = time.time()
         base = flux2_klein_remove_object(pool, source, mask)
         print(f"  removed in {time.time() - start:.1f}s")
+    two_step = case.remove_first and args.replace_mode == "two-step"
+    direct = case.remove_first and args.replace_mode == "direct"
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     for how in hows:
+        if direct and how == "mask":
+            continue  # direct replace has a single variant
         torch.manual_seed(args.seed)
         debug: dict = {}
         start = time.time()
@@ -146,7 +151,11 @@ def run_case(
             print(f"  auto anchor: {anchor!r}")
         options = {"anchor": anchor, "refine": args.refine}
         try:
-            if how == "box":
+            if direct:
+                output = flux2_klein_replace_object(
+                    pool, source, mask, case.prompt, debug=debug, **options
+                )
+            elif how == "box":
                 output = flux2_klein_add_object_with_box(
                     pool, base, box, case.prompt, debug=debug, **options
                 )
@@ -159,14 +168,16 @@ def run_case(
             continue
         print(f"  [{how}] {case.prompt!r}: {time.time() - start:.1f}s")
 
-        stem = f"{name}_{how}" + ("_refine" if args.refine else "")
+        stem = f"{name}_{'replace' if direct else how}" + (
+            "_refine" if args.refine else ""
+        )
         overlay = source.copy()
         overlay.paste(
             Image.new("RGB", source.size, (255, 0, 255)),
             mask=mask.point(lambda v: 90 if v >= 128 else 0),
         )
-        images = [source, overlay, *([base] if case.remove_first else []), output]
-        titles = ["source", "target", *(["removed"] if case.remove_first else []), how]
+        images = [source, overlay, *([base] if two_step else []), output]
+        titles = ["source", "target", *(["removed"] if two_step else []), how]
         panel = Image.new("RGB", (source.width * len(images), source.height))
         for index, (image, title) in enumerate(zip(images, titles)):
             panel.paste(labelled(image, title), (index * source.width, 0))
@@ -190,6 +201,12 @@ def main() -> None:
         "--auto-anchor",
         action="store_true",
         help="ignore the hard-coded anchors and ask Gemini for each placement phrase",
+    )
+    parser.add_argument(
+        "--replace-mode",
+        default="direct",
+        choices=["direct", "two-step"],
+        help="cases with a removal: one Klein replace pass, or remove then add",
     )
     parser.add_argument(
         "--how",

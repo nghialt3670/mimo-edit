@@ -175,13 +175,16 @@ def blend_edit(
     mask: np.ndarray,
     *,
     harmonize: bool = True,
+    extra_weight: np.ndarray | None = None,
     debug: dict | None = None,
 ) -> tuple[Image.Image, np.ndarray]:
     """Paste Klein's edit into the whole ``scene`` using the ViTMatte matte.
 
     ``after`` is Klein's edit of ``scene.crop(crop_box)`` and ``mask`` the object
     region in crop coordinates; it only seeds the trimap. The matte of ``after``
-    is the paste weight (no change detection, clamp or threshold).
+    is the paste weight (no change detection, clamp or threshold). ``extra_weight``
+    (crop-sized, 0..1) is merged into it with a maximum, e.g. to also take Klein's
+    pixels where an old object was removed; the merged weight is returned.
 
     The matted object is first composited onto the full scene. With ``harmonize``
     PCT-Net then runs on that whole image, wherever the matte is not black, with
@@ -191,6 +194,8 @@ def blend_edit(
     (``harmonized``).
     """
     matte = vitmatte_alpha(pool, after, mask)
+    if extra_weight is not None:
+        matte = np.maximum(matte, extra_weight.astype(matte.dtype))
     weight = Image.fromarray((matte * 255).astype(np.uint8), "L")
     full = scene.convert("RGB").copy()
     full.paste(Image.composite(after, full.crop(crop_box), weight), crop_box[:2])

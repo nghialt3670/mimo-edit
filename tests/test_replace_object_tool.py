@@ -22,17 +22,15 @@ class ReplaceObjectToolTests(unittest.TestCase):
             )
         )
 
-    def test_prompt_replacement_removes_then_adds_in_mask_bounds(self):
-        cleaned = Image.new("RGB", self.image.size, "gray")
+    def test_prompt_replacement_calls_direct_replace(self):
         with (
             patch(
-                "framework.tools.image_editing.replace_object.flux2_klein_remove_object",
-                return_value=cleaned,
+                "framework.tools.image_editing.replace_object.flux2_klein_remove_object"
             ) as remove,
             patch(
-                "framework.tools.image_editing.replace_object.flux2_klein_add_object_with_box",
+                "framework.tools.image_editing.replace_object.flux2_klein_replace_object",
                 return_value=self.image,
-            ) as add,
+            ) as replace,
             patch(
                 "framework.tools.image_editing.replace_object.describe_anchor",
                 return_value="on the water",
@@ -46,11 +44,11 @@ class ReplaceObjectToolTests(unittest.TestCase):
             )
 
         self.assertIs(result, self.image)
-        remove.assert_called_once_with(self.ctx.model_pool, self.image, self.mask)
-        add.assert_called_once_with(
+        remove.assert_not_called()
+        replace.assert_called_once_with(
             self.ctx.model_pool,
-            cleaned,
-            (4, 3, 12, 11),
+            self.image,
+            self.mask,
             "a small red boat",
             anchor="on the water",
         )
@@ -65,7 +63,7 @@ class ReplaceObjectToolTests(unittest.TestCase):
                 return_value=cleaned,
             ) as remove,
             patch(
-                "framework.tools.image_editing.replace_object.flux2_klein_add_object_with_box"
+                "framework.tools.image_editing.replace_object.flux2_klein_replace_object"
             ) as add,
         ):
             result = replace_object(

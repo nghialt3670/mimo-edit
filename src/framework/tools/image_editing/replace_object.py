@@ -3,8 +3,8 @@ from __future__ import annotations
 from PIL import Image
 
 from framework.inference import (
-    flux2_klein_add_object_with_box,
     flux2_klein_remove_object,
+    flux2_klein_replace_object,
 )
 from framework.inference.flux2_klein.placement import describe_anchor
 
@@ -35,7 +35,7 @@ def _validate_replace_object_args(
 
 @register_tool(
     "replace_object",
-    "Replace the selected object either with a supplied replacement image or with an object described by a text prompt.",
+    "Replace the selected object either with a supplied replacement image or with an object described by a text prompt, which Klein swaps in directly.",
     {
         "image": {"type": "image", "description": "Image to edit."},
         "mask": {
@@ -49,7 +49,7 @@ def _validate_replace_object_args(
         },
         "prompt": {
             "type": "string",
-            "description": "Optional description of the object Klein should add after the selected object is removed. Provide this or replacement, not both.",
+            "description": "Optional description of the object Klein should put in place of the selected object. Provide this or replacement, not both.",
             "nullable": True,
         },
         "anchor": {
@@ -69,18 +69,14 @@ def replace_object(
     anchor: str | None = None,
 ) -> Image.Image:
     bounds = _validate_replace_object_args(image, mask, replacement, prompt)
-    clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
     if prompt is not None:
         if anchor is None:
-            anchor = describe_anchor(clean, bounds, prompt)
-        return flux2_klein_add_object_with_box(
-            ctx.model_pool,
-            clean,
-            bounds,
-            prompt,
-            anchor=anchor,
+            anchor = describe_anchor(image, bounds, prompt)
+        return flux2_klein_replace_object(
+            ctx.model_pool, image, mask, prompt, anchor=anchor
         )
 
+    clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
     if replacement is None:
         raise RuntimeError("replacement or prompt must be provided")
     fitted = replacement.convert("RGBA").resize(

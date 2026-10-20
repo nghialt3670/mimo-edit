@@ -34,10 +34,19 @@ MASK_ATTEMPT_PROMPTS = (
 )
 
 
-def _paste(pool, original, crop_box, edited, object_mask, refine, debug):
+def _paste(
+    pool, original, crop_box, edited, object_mask, refine, debug, extra_weight=None
+):
     """Paste with the matte, then harmonize with PCT-Net or refine with Klein."""
     result, matte = blend_edit(
-        pool, original, crop_box, edited, object_mask, harmonize=not refine, debug=debug
+        pool,
+        original,
+        crop_box,
+        edited,
+        object_mask,
+        harmonize=not refine,
+        extra_weight=extra_weight,
+        debug=debug,
     )
     if refine:
         from .refine import klein_refine
