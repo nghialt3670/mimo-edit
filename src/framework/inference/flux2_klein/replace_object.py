@@ -11,8 +11,8 @@ from .placement import GUIDE, placement
 from .utils import WORK_SIZE, binary_mask, generate_klein_edit
 
 REPLACE_PROMPTS = (
-    "Replace the object in the middle of the image with {prompt}{where}. {guide} Preserve the surroundings.",
-    "Remove the object in the middle of the image and clearly draw {prompt}{where} in its place as a distinct, fully visible object. {guide} Preserve the surroundings.",
+    "Replace the object in the middle of the image with {prompt}{where}. {guide} Add nothing else and preserve the surroundings.",
+    "Remove the object in the middle of the image and clearly draw {prompt}{where} in its place as a distinct, fully visible object. {guide} Add nothing else and preserve the surroundings.",
 )
 # The old object's area (grown by this fraction of its size) takes Klein's pixels.
 OLD_AREA_GROW = 0.04

@@ -84,7 +84,7 @@ CASES: dict[str, Case] = {
         "a dog",
         entity_id="e3",
         remove_first=True,
-        anchor="sitting on the wet wooden deck between the two black cats",
+        anchor="sitting on the wet wooden deck",
         note="replace v3 with a dog",
     ),
     "m57_dog_replace_rope": Case(
@@ -147,7 +147,7 @@ def run_case(
         start = time.time()
         anchor = case.anchor
         if args.auto_anchor:
-            anchor = describe_anchor(base, box, case.prompt)
+            anchor = describe_anchor(base, box, case.prompt, replacing=direct)
             print(f"  auto anchor: {anchor!r}")
         options = {"anchor": anchor, "refine": args.refine}
         try:

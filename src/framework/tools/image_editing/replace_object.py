@@ -71,7 +71,7 @@ def replace_object(
     bounds = _validate_replace_object_args(image, mask, replacement, prompt)
     if prompt is not None:
         if anchor is None:
-            anchor = describe_anchor(image, bounds, prompt)
+            anchor = describe_anchor(image, bounds, prompt, replacing=True)
         return flux2_klein_replace_object(
             ctx.model_pool, image, mask, prompt, anchor=anchor
         )

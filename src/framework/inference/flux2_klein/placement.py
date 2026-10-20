@@ -12,7 +12,12 @@ ANCHOR_SYSTEM_PROMPT = (
     "marks the target region. Reply with ONE short placement phrase of at most "
     "8 words: a preposition plus the existing object or surface at that region "
     "(for example 'on the blue cooler' or 'on the wooden floor'). Mention the "
-    "region's own surface or object only, never the new object. No other text."
+    "region's own surface or object only, never the new object and never other "
+    "objects or animals nearby. No other text."
+)
+REPLACE_NOTE = (
+    " The region currently holds an object that is being replaced: describe the "
+    "ground or surface it stands on or hangs from, not the object itself."
 )
 GUIDE = (
     "Match the scene's lighting, scale and perspective, with a natural contact "
@@ -33,6 +38,7 @@ def describe_anchor(
     *,
     client=None,
     model: str | None = None,
+    replacing: bool = False,
 ) -> str | None:
     """Ask Gemini what the region sits on; ``None`` when unavailable or it fails."""
     try:
@@ -60,7 +66,9 @@ def describe_anchor(
                 types.Part.from_bytes(data=buffer.getvalue(), mime_type="image/png"),
             ],
             config=types.GenerateContentConfig(
-                system_instruction=ANCHOR_SYSTEM_PROMPT, temperature=0
+                system_instruction=ANCHOR_SYSTEM_PROMPT
+                + (REPLACE_NOTE if replacing else ""),
+                temperature=0,
             ),
         )
         text = " ".join((response.text or "").split()).strip(" .\"'")
