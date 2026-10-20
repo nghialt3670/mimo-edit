@@ -1,0 +1,6 @@
+[submodule "src/framework/inference/external/pctnet_upstream"]
+	path = src/framework/inference/external/pctnet_upstream
+	url = https://github.com/rakutentech/PCT-Net-Image-Harmonization.git
+[submodule "src/framework/inference/external/mice_upstream"]
+	path = src/framework/inference/external/mice_upstream
+	url = https://github.com/Blowing-Up-Groundhogs/mice.git
