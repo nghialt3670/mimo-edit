@@ -4,20 +4,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-import numpy as np
 from PIL import Image
 
-from ..birefnet import birefnet_alpha_matte
 from ..pool import ModelPool
 from ..utils import validate_number_range
-from .utils import (
-    binary_mask,
-    blend_edit,
-    feather_radius,
-    generate_klein_edit,
-    grow,
-    harmonize_with_mask,
-)
+from .utils import binary_mask, blend_edit, generate_klein_edit
 
 # Context Klein sees around the object in local mode (fraction of the bbox, >= 16px).
 LOCAL_CONTEXT = 0.2
@@ -71,21 +62,15 @@ def flux2_klein_edit_object(
     *,
     mode: Literal["local", "regional", "global"] = "local",
     padding: float = 0.2,
-    harmonize: bool = True,
-    matting: bool = True,
-    refine_leakage: bool = False,
     debug: dict | None = None,
 ) -> Image.Image:
-    """Edit one masked object with Klein and paste back only what changed.
+    """Edit one masked object with Klein and paste it back with a ViTMatte matte.
 
     - ``global``: the whole image goes to Klein and its result is returned.
     - ``local`` / ``regional``: Klein edits a crop around the object (extra
-      context in local mode, ``padding`` of the bbox in regional mode), then
-      ``blend_edit`` pastes it back: the paste region is the object mask plus any
-      significant change connected to it inside that neighborhood, harmonized
-      with PCT-Net (``harmonize``) and pasted with a per-pixel alpha. Pixels elsewhere stay
-      original.
-
+      context in local mode, ``padding`` of the bbox in regional mode). The
+      matte of Klein's output, with a trimap seeded by the mask, is the paste
+      weight; nothing else is applied.
     """
     if not isinstance(image, Image.Image):
         raise TypeError("image must be a Pillow image")
@@ -114,23 +99,18 @@ def flux2_klein_edit_object(
         edited = generate_klein_edit(pipeline, current, instruction, config)
         if edited.size != current.size:
             edited = edited.resize(current.size, Image.Resampling.LANCZOS)
-        if harmonize:
-            edited = harmonize_with_mask(pool.pctnet_pipeline, edited, mask)
         return edited
 
-    # Neighborhood in which Klein's changes may be pasted back.
     if mode == "regional":
         margin_x, margin_y = round(width * padding), round(height * padding)
     else:
         margin_x = max(16, round(width * LOCAL_CONTEXT))
         margin_y = max(16, round(height * LOCAL_CONTEXT))
-    feather = feather_radius(width, height)
-    support = int(np.ceil(feather * 3))
     crop_box = (
-        max(0, left - margin_x - support),
-        max(0, top - margin_y - support),
-        min(image.width, right + margin_x + support),
-        min(image.height, bottom + margin_y + support),
+        max(0, left - margin_x),
+        max(0, top - margin_y),
+        min(image.width, right + margin_x),
+        min(image.height, bottom + margin_y),
     )
 
     before = current.crop(crop_box)
@@ -139,16 +119,7 @@ def flux2_klein_edit_object(
         after = after.resize(before.size, Image.Resampling.LANCZOS)
 
     object_mask = binary_mask(mask.crop(crop_box))
-    blended = blend_edit(
-        before,
-        after,
-        minimum=object_mask,
-        limit=grow(object_mask, margin_x, margin_y),
-        predictor=pool.pctnet_pipeline if harmonize else None,
-        matter=(lambda image: birefnet_alpha_matte(pool, image)) if matting else None,
-        refine_leakage=refine_leakage,
-        reach=max(6.0, 0.05 * min(width, height)) if mode == "local" else None,
-        debug=debug,
-    )
-    current.paste(blended, crop_box[:2])
-    return current
+    result, matte = blend_edit(pool, current, crop_box, after, object_mask, debug=debug)
+    if debug is not None:
+        debug.update(before=before, klein=after, matte=matte, minimum=object_mask)
+    return result

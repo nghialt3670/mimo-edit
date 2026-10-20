@@ -81,26 +81,37 @@ def _poisson_blend(
     selected = (np.asarray(mask) > 127).astype(np.uint8)
     if grow_px:
         selected = maximum_filter(selected, size=2 * grow_px + 1, mode="constant")
-    selected[[0, -1], :] = 0  # cloning needs a boundary inside the image
-    selected[:, [0, -1]] = 0
-    ys, xs = np.nonzero(selected)
-    if len(ys) == 0:
+    if not selected.any():
         return result
+    # Cloning needs the mask boundary strictly inside the image, and it keeps the
+    # boundary pixels equal to the destination. Pad all three by a margin so an
+    # object touching the image edge is still cloned right up to the edge; in the
+    # margin the destination is the generated fill itself, so the edge stays
+    # consistent with it instead of reverting to the original object.
+    pad = 8
+    source = np.pad(np.asarray(result), ((pad, pad), (pad, pad), (0, 0)), mode="edge")
+    destination = np.pad(
+        np.asarray(reference), ((pad, pad), (pad, pad), (0, 0)), mode="edge"
+    )
+    clone = np.pad(selected, pad, mode="edge")
+    clone[[0, -1], :] = 0
+    clone[:, [0, -1]] = 0
+    margin = np.ones(clone.shape, bool)
+    margin[pad:-pad, pad:-pad] = False
+    destination[margin & (clone > 0)] = source[margin & (clone > 0)]
+    ys, xs = np.nonzero(clone)
     x0, x1, y0, y1 = xs.min(), xs.max() + 1, ys.min(), ys.max() + 1
-    source = np.ascontiguousarray(np.asarray(result)[y0:y1, x0:x1])
-    clone_mask = np.ascontiguousarray(selected[y0:y1, x0:x1] * 255)
-    destination = np.ascontiguousarray(np.asarray(reference))
     try:
         blended = cv2.seamlessClone(
-            source,
-            destination,
-            clone_mask,
+            np.ascontiguousarray(source[y0:y1, x0:x1]),
+            np.ascontiguousarray(destination),
+            np.ascontiguousarray(clone[y0:y1, x0:x1] * 255),
             (int(x0 + (x1 - x0) // 2), int(y0 + (y1 - y0) // 2)),
             cv2.NORMAL_CLONE,
         )
     except cv2.error:
         return result
-    return Image.fromarray(blended)
+    return Image.fromarray(blended[pad:-pad, pad:-pad])
 
 
 def _binary(mask: Image.Image) -> np.ndarray:

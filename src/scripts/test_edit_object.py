@@ -2,11 +2,11 @@
 """Debug ``flux2_klein_edit_object`` on a MIRA-Bench sample.
 
 Loads the source image and the annotated mask of one entity (default: sample
-``mirage:30.jpg``, entity ``e2``, the left cat), runs the edit
+``mirage:30.jpg``, entity ``e2``, the left cat, recolored to blue), runs the edit
 with several prompt wordings and saves a side-by-side comparison.
 
     uv run python -m scripts.test_edit_object
-    uv run python -m scripts.test_edit_object --entity-id e2 --prompt "Make it stone"
+    uv run python -m scripts.test_edit_object --entity-id e5 --prompt "Make it stone"
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ import os
 import time
 from pathlib import Path
 
-import cv2
 import numpy as np
 import torch
 from PIL import Image, ImageDraw
@@ -26,7 +25,7 @@ from framework.inference import InferenceConfig, ModelPool
 from framework.inference.flux2_klein import flux2_klein_edit_object
 
 DEFAULT_PROMPTS = [
-    "Change the color of the cat to blue",
+    "Change the color of the left cat to blue",
 ]
 DATASET_ID = "ziqiangoodgood/MIRAGE"
 ANNOTATION_ROOT = Path(".out/annotation/mira_bench")
@@ -86,42 +85,17 @@ def gray(array: np.ndarray) -> Image.Image:
 
 
 def save_debug(debug: dict, folder: Path) -> None:
-    """Save the paste-back internals: what Klein changed and what was pasted."""
+    """Save the pipeline internals: crop, Klein output, seed mask, matte, and the harmonized/blended crops."""
     folder.mkdir(parents=True, exist_ok=True)
-    if "ramp" not in debug:
+    if "matte" not in debug:
         print("no debug data (global mode?)")
         return
-    region, minimum = debug["region"], debug["minimum"]
-    print(
-        f"  minimum {int(minimum.sum())} px, pasted (alpha>0.5) {int(region.sum())} px "
-        f"(+{int((region & ~minimum).sum())} beyond mask)"
-    )
-    if "matte" in debug:
-        # The raw 8-bit matte straight from BiRefNet, before any guard.
-        gray(debug["matte"]).save(folder / "matte_raw.png")
-    if "diff" in debug:
-        diff = debug["diff"]
-        heat = np.clip(diff / max(float(diff.max()), 1e-6), 0, 1)
-        colored = cv2.applyColorMap((heat * 255).astype(np.uint8), cv2.COLORMAP_INFERNO)
-        Image.fromarray(colored[..., ::-1]).save(folder / "diff_heatmap.png")
-    gray(debug["ramp"]).save(folder / "ramp_alpha.png")
-    gray(debug["minimum"]).save(folder / "original_mask.png")
-    gray(debug["limit"]).save(folder / "limit.png")
-    gray(debug["region"]).save(folder / "final_region.png")
-    Image.fromarray(debug["alpha"]).save(folder / "paste_alpha.png")
     debug["before"].save(folder / "before.png")
     debug["klein"].save(folder / "klein_raw.png")
+    gray(debug["minimum"]).save(folder / "original_mask.png")
+    gray(debug["matte"]).save(folder / "matte_raw.png")
     debug["harmonized"].save(folder / "after_harmonize.png")
-    # Red: original mask; green: pasted beyond the mask.
-    overlay = np.asarray(debug["klein"]).copy()
-    overlay[minimum] = (overlay[minimum] * 0.5 + np.array([255, 0, 0]) * 0.5).astype(
-        np.uint8
-    )
-    extra = region & ~minimum
-    overlay[extra] = (overlay[extra] * 0.4 + np.array([0, 255, 0]) * 0.6).astype(
-        np.uint8
-    )
-    Image.fromarray(overlay).save(folder / "region_on_klein.png")
+    debug["composite"].save(folder / "composite_before_harmonize.png")
 
 
 def main() -> None:
@@ -137,15 +111,6 @@ def main() -> None:
         "--mode", default="local", choices=["local", "regional", "global"]
     )
     parser.add_argument("--padding", type=float, default=0.25)
-    parser.add_argument("--no-harmonize", action="store_true")
-    parser.add_argument(
-        "--no-matting", action="store_true", help="Use the change-based alpha"
-    )
-    parser.add_argument(
-        "--refine-leakage",
-        action="store_true",
-        help="Revert background that Klein only tone-shifted (matting only)",
-    )
     parser.add_argument("--annotation-file", type=Path, default=None)
     parser.add_argument(
         "--output-dir", type=Path, default=Path(".out/debug/edit_object")
@@ -185,9 +150,6 @@ def main() -> None:
             prompt,
             mode=args.mode,
             padding=args.padding,
-            harmonize=not args.no_harmonize,
-            matting=not args.no_matting,
-            refine_leakage=args.refine_leakage,
             debug=debug,
         )
         print(f"[{index}] {prompt!r}: {time.time() - start:.1f}s")

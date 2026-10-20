@@ -17,7 +17,6 @@ from .utils import (
     WORK_SIZE,
     binary_mask,
     blend_edit,
-    edge_padded_crop,
     generate_klein_edit,
 )
 
@@ -27,13 +26,12 @@ def flux2_klein_add_object_with_box(
     image: Image.Image,
     box: Sequence[float],
     prompt: str,
-    *,
-    harmonize: bool = True,
+    debug: dict | None = None,
 ) -> Image.Image:
     """Add an object near an XYXY pixel box.
 
-    Klein edits the box crop; ``blend_edit`` then pastes back only the pixels it
-    changed (the new object), harmonized with PCT-Net (``harmonize``) with a per-pixel alpha.
+    Klein edits the box crop; the ViTMatte matte of its output (trimap seeded
+    by the box) is the paste weight.
     """
     pipe = pool.flux2_klein_pipeline
     if not isinstance(image, Image.Image):
@@ -55,8 +53,19 @@ def flux2_klein_add_object_with_box(
     if x1 >= x2 or y1 >= y2:
         raise ValueError("box must have positive area inside the image")
     pad = math.ceil(max(x2 - x1, y2 - y1) * PADDING_FRAC)
-    crop_box = (x1 - pad, y1 - pad, x2 + pad, y2 + pad)
-    cropped = edge_padded_crop(original, crop_box)
+    # Slide the window back inside the image instead of edge-padding it, so
+    # Klein sees real context when the box touches a border.
+    cx1, cy1 = x1 - pad, y1 - pad
+    cx2, cy2 = x2 + pad, y2 + pad
+    shift_x = max(0, -cx1) - max(0, cx2 - width)
+    shift_y = max(0, -cy1) - max(0, cy2 - height)
+    crop_box = (
+        max(0, cx1 + shift_x),
+        max(0, cy1 + shift_y),
+        min(width, cx2 + shift_x),
+        min(height, cy2 + shift_y),
+    )
+    cropped = original.crop(crop_box)
     cw, ch = cropped.size
     scale = WORK_SIZE / max(cw, ch)
     ww = max(64, round(cw * scale / 16) * 16)
@@ -79,21 +88,13 @@ def flux2_klein_add_object_with_box(
     if edited.size != (ww, wh):
         raise ValueError(f"Klein returned {edited.size}, expected {(ww, wh)}")
     edited = edited.resize((cw, ch), Image.Resampling.LANCZOS)
-    blended = blend_edit(
-        cropped,
-        edited,
-        minimum=np.zeros((ch, cw), bool),
-        limit=np.ones((ch, cw), bool),
-        predictor=pool.pctnet_pipeline if harmonize else None,
-    )
-    cx1, cy1, cx2, cy2 = crop_box
-    vx1, vy1 = max(cx1, 0), max(cy1, 0)
-    vx2, vy2 = min(cx2, width), min(cy2, height)
-    result = original.copy()
-    result.paste(
-        blended.crop((vx1 - cx1, vy1 - cy1, vx2 - cx1, vy2 - cy1)),
-        (vx1, vy1),
-    )
+    box_mask = np.zeros((ch, cw), bool)
+    box_mask[
+        y1 - crop_box[1] : y2 - crop_box[1], x1 - crop_box[0] : x2 - crop_box[0]
+    ] = True
+    result, matte = blend_edit(pool, original, crop_box, edited, box_mask, debug=debug)
+    if debug is not None:
+        debug.update(before=cropped, klein=edited, matte=matte, minimum=box_mask)
     return result
 
 
@@ -102,14 +103,12 @@ def flux2_klein_add_object_with_mask(
     image: Image.Image,
     mask: Image.Image,
     prompt: str,
-    *,
-    harmonize: bool = True,
+    debug: dict | None = None,
 ) -> Image.Image:
     """Add an object at a white mask.
 
-    Klein edits a crop around the mask; ``blend_edit`` then pastes back the mask
-    plus any significant change connected to it, harmonized with PCT-Net
-    (``harmonize``) with a per-pixel alpha.
+    Klein edits a crop around the mask; the ViTMatte matte of its output (trimap
+    seeded by the mask) is the paste weight.
     """
     if not isinstance(image, Image.Image) or not isinstance(mask, Image.Image):
         raise TypeError("image and mask must both be PIL images")
@@ -143,13 +142,11 @@ def flux2_klein_add_object_with_mask(
         edited = edited.resize(working_image.size, Image.Resampling.LANCZOS)
     edited = edited.resize(original_crop.size, Image.Resampling.LANCZOS)
     object_mask = binary_mask(mask.crop(crop_box))
-    blended = blend_edit(
-        original_crop,
-        edited,
-        minimum=object_mask,
-        limit=np.ones_like(object_mask),
-        predictor=pool.pctnet_pipeline if harmonize else None,
+    result, matte = blend_edit(
+        pool, original, crop_box, edited, object_mask, debug=debug
     )
-    result = original.copy()
-    result.paste(blended, crop_box[:2])
+    if debug is not None:
+        debug.update(
+            before=original_crop, klein=edited, matte=matte, minimum=object_mask
+        )
     return result

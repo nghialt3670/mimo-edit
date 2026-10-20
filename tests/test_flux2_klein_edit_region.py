@@ -26,64 +26,44 @@ class EditRegionTests(unittest.TestCase):
             crops.append(crop.size)
             return paint(crop)
 
-        with patch(
-            "framework.inference.flux2_klein.edit_object.generate_klein_edit", fake
+        with (
+            patch(
+                "framework.inference.flux2_klein.edit_object.generate_klein_edit",
+                fake,
+            ),
+            patch(
+                "framework.inference.flux2_klein.utils.harmonize_with_mask",
+                side_effect=lambda _p, image, _m: image,
+            ),
+            patch(
+                "framework.inference.flux2_klein.utils.vitmatte_alpha",
+                side_effect=lambda _pool, _img, m: m.astype(float),
+            ),
         ):
             result = flux2_klein_edit_object(
                 self.pool,
                 self.image,
                 self.mask,
                 "x",
-                harmonize=False,
-                matting=False,
                 **kwargs,
             )
         return result, crops
 
-    def test_unchanged_klein_output_keeps_image(self):
+    def test_paste_weight_is_the_matte(self):
         result, _ = self._edit(
-            lambda crop: Image.new("RGB", crop.size, (100, 100, 100)), mode="local"
+            lambda crop: Image.new("RGB", crop.size, (30, 30, 200)), mode="local"
         )
-        self.assertEqual(result.getpixel((120, 120)), (100, 100, 100))
+        self.assertEqual(result.getpixel((120, 120)), (30, 30, 200))
+        self.assertEqual(result.getpixel((200, 120)), (100, 100, 100))
 
-    def test_mask_is_pasted_even_when_klein_barely_changes_it(self):
-        result, _ = self._edit(
-            lambda crop: Image.new("RGB", crop.size, (103, 100, 100)), mode="local"
-        )
-        self.assertEqual(result.getpixel((120, 120)), (103, 100, 100))
-
-    def test_regional_change_touching_mask_outside_it_is_pasted(self):
+    def test_pixels_outside_matte_are_untouched(self):
         def paint(crop):
-            # Crop origin is 100 - 20 (regional margin) - 6 (feather support) = 74.
-            out = Image.new("RGB", crop.size, (100, 100, 100))
-            out.paste((30, 30, 200), (100 - 74, 100 - 74, 160 - 74, 140 - 74))
+            out = Image.new("RGB", crop.size, (255, 0, 0))
             return out
 
         result, _ = self._edit(paint, mode="regional", padding=0.5)
-        self.assertEqual(result.getpixel((120, 120)), (30, 30, 200))
-        self.assertEqual(result.getpixel((150, 120)), (30, 30, 200))
-        self.assertEqual(result.getpixel((200, 120)), (100, 100, 100))
-
-    def test_local_change_far_from_mask_is_not_pasted(self):
-        def paint(crop):
-            # Crop origin is 100 - 16 (local context) - 6 (feather support) = 78.
-            out = Image.new("RGB", crop.size, (100, 100, 100))
-            out.paste((30, 30, 200), (100 - 78, 100 - 78, 160 - 78, 140 - 78))
-            return out
-
-        result, _ = self._edit(paint, mode="local")
-        self.assertEqual(result.getpixel((120, 120)), (30, 30, 200))
-        self.assertEqual(result.getpixel((156, 120)), (100, 100, 100))
-
-    def test_distant_unconnected_change_is_ignored(self):
-        def paint(crop):
-            out = Image.new("RGB", crop.size, (100, 100, 100))
-            out.paste((255, 0, 0), (0, 0, 8, 8))  # far corner, not touching the mask
-            out.paste((255, 255, 255), (30, 30, 70, 70))
-            return out
-
-        result, _ = self._edit(paint, mode="local")
-        self.assertEqual(result.getpixel((74, 74)), (100, 100, 100))
+        self.assertEqual(result.getpixel((150, 120)), (100, 100, 100))
+        self.assertEqual(result.getpixel((120, 120)), (255, 0, 0))
 
     def test_global_returns_full_klein_output(self):
         result, crops = self._edit(

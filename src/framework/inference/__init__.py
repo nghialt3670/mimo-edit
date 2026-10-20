@@ -1,11 +1,10 @@
-from .birefnet import birefnet_alpha_matte
 from .config import (
-    BiRefNetInferenceConfig,
     GroundingDinoInferenceConfig,
     InferenceConfig,
     KleinInferenceConfig,
     ObjectClearInferenceConfig,
     Sam3InferenceConfig,
+    ViTMatteInferenceConfig,
 )
 from .flux2_klein import (
     flux2_klein_add_object_with_box,
@@ -18,10 +17,11 @@ from .mice import mice_add_object_with_box
 from .object_clear import object_clear_remove_object
 from .pool import ModelPool
 from .sam3 import sam3_segment_mask, sam3_segment_masks
+from .vitmatte import vitmatte_alpha
 
 __all__ = [
-    "BiRefNetInferenceConfig",
-    "birefnet_alpha_matte",
+    "ViTMatteInferenceConfig",
+    "vitmatte_alpha",
     "InferenceConfig",
     "GroundingDinoInferenceConfig",
     "KleinInferenceConfig",

@@ -62,7 +62,7 @@ class ModelPool:
     SAM3_MODEL_ID = "facebook/sam3"
     GROUNDING_DINO_MODEL_ID = "IDEA-Research/grounding-dino-tiny"
     OBJECT_CLEAR_MODEL_ID = "jixin0101/ObjectClear"
-    BIREFNET_MATTING_MODEL_ID = "ZhengPeng7/BiRefNet_HR-matting"
+    VITMATTE_MODEL_ID = "hustvl/vitmatte-base-composition-1k"
 
     def __init__(self, config: InferenceConfig | None = None) -> None:
         seed_random_generators()
@@ -157,14 +157,12 @@ class ModelPool:
         return load_pctnet(device="cpu", variant="CNN")
 
     @cached_property
-    def birefnet_matting_model(self):
-        from transformers import AutoModelForImageSegmentation
+    def vitmatte_model(self):
+        from transformers import VitMatteForImageMatting, VitMatteImageProcessor
 
-        torch.set_float32_matmul_precision("high")
-        model = AutoModelForImageSegmentation.from_pretrained(
-            self.BIREFNET_MATTING_MODEL_ID, trust_remote_code=True
-        )
-        return model.to(self.device, torch_dtype(self.device)).eval()
+        processor = VitMatteImageProcessor.from_pretrained(self.VITMATTE_MODEL_ID)
+        model = VitMatteForImageMatting.from_pretrained(self.VITMATTE_MODEL_ID)
+        return processor, model.to(self.device, torch_dtype(self.device)).eval()
 
     @cached_property
     def sam3_pipelines(self) -> Sam3Pipelines:

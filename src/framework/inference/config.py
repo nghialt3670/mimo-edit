@@ -73,14 +73,14 @@ class ObjectClearInferenceConfig:
 
 
 @dataclass(frozen=True)
-class BiRefNetInferenceConfig:
-    """Inference settings for the fixed BiRefNet HR-Matting model."""
+class ViTMatteInferenceConfig:
+    """Inference settings for the fixed ViTMatte alpha-matting model."""
 
-    # The model was trained at 2048x2048; lower it only to save memory.
-    resolution: int = 2048
+    # Longest side of the matting input; larger crops are downscaled.
+    max_side: int = 1536
 
     def __post_init__(self) -> None:
-        validate_positive_integer("birefnet.resolution", self.resolution)
+        validate_positive_integer("vitmatte.max_side", self.max_side)
 
 
 @dataclass(frozen=True)
@@ -95,7 +95,7 @@ class InferenceConfig:
     object_clear: ObjectClearInferenceConfig = field(
         default_factory=ObjectClearInferenceConfig
     )
-    birefnet: BiRefNetInferenceConfig = field(default_factory=BiRefNetInferenceConfig)
+    vitmatte: ViTMatteInferenceConfig = field(default_factory=ViTMatteInferenceConfig)
     low_vram: bool = False
 
     def __post_init__(self) -> None:
@@ -104,7 +104,7 @@ class InferenceConfig:
             ("sam3", self.sam3, Sam3InferenceConfig),
             ("grounding_dino", self.grounding_dino, GroundingDinoInferenceConfig),
             ("object_clear", self.object_clear, ObjectClearInferenceConfig),
-            ("birefnet", self.birefnet, BiRefNetInferenceConfig),
+            ("vitmatte", self.vitmatte, ViTMatteInferenceConfig),
         ):
             if not isinstance(value, config_type):
                 raise TypeError(f"{name} must be a {config_type.__name__}")
