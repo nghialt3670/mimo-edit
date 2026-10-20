@@ -61,11 +61,6 @@ def _validate_add_object_args(
             "description": "Short placement phrase: a preposition plus the object or surface the new object rests on or sits next to, e.g. 'on the wooden bench'. Inferred from the image if omitted.",
             "nullable": True,
         },
-        "ground_shadow": {
-            "type": "boolean",
-            "description": "True when the object stands on the ground or a surface, so a soft contact shadow is added if the model drew none. Leave false for stickers or decals.",
-            "nullable": True,
-        },
         "box": {
             "type": "array",
             "description": "Approximate placement box [x1, y1, x2, y2] in image pixels.",
@@ -86,7 +81,6 @@ def add_object(
     mask: Image.Image | None = None,
     box: list[float] | None = None,
     anchor: str | None = None,
-    ground_shadow: bool | None = None,
 ) -> Image.Image:
     _validate_add_object_args(image, prompt, mask, box)
     if anchor is not None:
@@ -98,7 +92,7 @@ def add_object(
             else mask.convert("L").getbbox()
         )
         anchor = describe_anchor(image, region, prompt)
-    options = {"anchor": anchor, "ground_shadow": bool(ground_shadow)}
+    options = {"anchor": anchor}
 
     if box is not None:
         return flux2_klein_add_object_with_box(

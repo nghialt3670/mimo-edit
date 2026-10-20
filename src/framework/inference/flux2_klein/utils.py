@@ -175,8 +175,6 @@ def blend_edit(
     mask: np.ndarray,
     *,
     harmonize: bool = True,
-    shadow: bool = False,
-    ground_shadow: bool = False,
     debug: dict | None = None,
 ) -> tuple[Image.Image, np.ndarray]:
     """Paste Klein's edit into the whole ``scene`` using the ViTMatte matte.
@@ -187,10 +185,7 @@ def blend_edit(
 
     The matted object is first composited onto the full scene. With ``harmonize``
     PCT-Net then runs on that whole image, wherever the matte is not black, with
-    strength scaled by the matte, so it sees the real surroundings. With
-    ``shadow`` the object's cast shadow is carried over first as a darkening of
-    the original scene (``ground_shadow`` adds a synthetic one if Klein drew
-    none); see ``transfer_shadow``. Returns the
+    strength scaled by the matte, so it sees the real surroundings. Returns the
     full image and the crop-sized matte. ``debug`` receives the crop-sized
     composite before harmonization (``composite``) and the harmonized crop
     (``harmonized``).
@@ -198,20 +193,6 @@ def blend_edit(
     matte = vitmatte_alpha(pool, after, mask)
     weight = Image.fromarray((matte * 255).astype(np.uint8), "L")
     full = scene.convert("RGB").copy()
-    if shadow:
-        from .shadow_transfer import transfer_shadow
-
-        shade, source = transfer_shadow(
-            full.crop(crop_box), after, matte, ground=ground_shadow
-        )
-        if source != "none":
-            darkened = np.asarray(full.crop(crop_box), np.float32) * shade[..., None]
-            full.paste(Image.fromarray(darkened.round().astype(np.uint8)), crop_box[:2])
-        if debug is not None:
-            debug["shadow_source"] = source
-            debug["shadow"] = Image.fromarray(
-                ((1.0 - shade) * 255).clip(0, 255).astype(np.uint8), "L"
-            )
     full.paste(Image.composite(after, full.crop(crop_box), weight), crop_box[:2])
     if debug is not None:
         debug["composite"] = full.crop(crop_box)

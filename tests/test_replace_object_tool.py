@@ -53,7 +53,6 @@ class ReplaceObjectToolTests(unittest.TestCase):
             (4, 3, 12, 11),
             "a small red boat",
             anchor="on the water",
-            ground_shadow=False,
         )
         describe.assert_called_once()
 

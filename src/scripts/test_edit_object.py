@@ -110,9 +110,10 @@ def save_debug(debug: dict, folder: Path) -> None:
     gray(debug["matte"]).save(folder / "matte_raw.png")
     debug["harmonized"].save(folder / "after_harmonize.png")
     debug["composite"].save(folder / "composite_before_harmonize.png")
-    if "shadow" in debug:
-        debug["shadow"].save(folder / "shadow_darkening.png")
-    for key in ("shadow_source", "mask_source", "attempt", "anchor"):
+    if "refined" in debug:
+        debug["refined"].save(folder / "after_klein_refine.png")
+        debug["refined_raw"].save(folder / "klein_refine_raw.png")
+    for key in ("mask_source", "attempt", "anchor"):
         if key in debug:
             print(f"  {key}: {debug[key]}")
 

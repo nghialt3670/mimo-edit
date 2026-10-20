@@ -51,9 +51,8 @@ class Case:
     # XYXY in the annotation's 1024-pixel space; used when there is no entity.
     box: tuple[int, int, int, int] | None = None
     remove_first: bool = False
-    # What the planner would pass: the placement phrase and whether the object stands on a surface.
+    # What the planner would pass: the placement phrase.
     anchor: str | None = None
-    ground_shadow: bool = False
     note: str = ""
 
 
@@ -85,7 +84,6 @@ CASES: dict[str, Case] = {
         entity_id="e3",
         remove_first=True,
         anchor="sitting on the wet wooden deck between the two black cats",
-        ground_shadow=True,
         note="replace v3 with a dog",
     ),
     "m57_dog_replace_rope": Case(
@@ -94,7 +92,6 @@ CASES: dict[str, Case] = {
         entity_id="e5",
         remove_first=True,
         anchor="lying on the concrete ground",
-        ground_shadow=True,
         note="replace v5 with a lying dog (touches two image edges)",
     ),
 }
@@ -147,7 +144,7 @@ def run_case(
         if args.auto_anchor:
             anchor = describe_anchor(base, box, case.prompt)
             print(f"  auto anchor: {anchor!r}")
-        options = {"anchor": anchor, "ground_shadow": case.ground_shadow}
+        options = {"anchor": anchor, "refine": args.refine}
         try:
             if how == "box":
                 output = flux2_klein_add_object_with_box(
@@ -162,7 +159,7 @@ def run_case(
             continue
         print(f"  [{how}] {case.prompt!r}: {time.time() - start:.1f}s")
 
-        stem = f"{name}_{how}"
+        stem = f"{name}_{how}" + ("_refine" if args.refine else "")
         overlay = source.copy()
         overlay.paste(
             Image.new("RGB", source.size, (255, 0, 255)),
@@ -184,6 +181,11 @@ def main() -> None:
     parser.add_argument("cases", nargs="*", help="case names (see --list)")
     parser.add_argument("--list", action="store_true", help="list the cases and exit")
     parser.add_argument("--all", action="store_true", help="run every case")
+    parser.add_argument(
+        "--refine",
+        action="store_true",
+        help="after pasting, refine the whole image with Klein instead of PCT-Net",
+    )
     parser.add_argument(
         "--auto-anchor",
         action="store_true",

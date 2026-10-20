@@ -34,6 +34,24 @@ MASK_ATTEMPT_PROMPTS = (
 )
 
 
+def _paste(pool, original, crop_box, edited, object_mask, refine, debug):
+    """Paste with the matte, then harmonize with PCT-Net or refine with Klein."""
+    result, matte = blend_edit(
+        pool, original, crop_box, edited, object_mask, harmonize=not refine, debug=debug
+    )
+    if refine:
+        from .refine import klein_refine
+
+        full = np.zeros((original.height, original.width), np.float32)
+        left, top, right, bottom = crop_box
+        full[top:bottom, left:right] = matte
+        result, raw = klein_refine(pool, result, full)
+        if debug is not None:
+            debug["refined"] = result
+            debug["refined_raw"] = raw
+    return result, matte
+
+
 def _generate_with_retry(pool, before, region, prompt, generate, debug):
     """Generate and segment the new object, retrying once with another seed and wording."""
     error: NothingAdded | None = None
@@ -60,13 +78,13 @@ def flux2_klein_add_object_with_box(
     debug: dict | None = None,
     *,
     anchor: str | None = None,
-    ground_shadow: bool = False,
+    refine: bool = False,
 ) -> Image.Image:
     """Add an object near an XYXY pixel box.
 
     ``anchor`` is a placement phrase ("on the blue cooler") added to the prompt.
-    The object's cast shadow is carried over from Klein's output; with
-    ``ground_shadow`` a soft contact shadow is synthesised if Klein drew none.
+    With ``refine`` the pasted result is run through Klein once more on the whole
+    image instead of PCT-Net, to blend the object in (see ``klein_refine``).
 
     Klein edits the box crop; SAM3 segments the added object in its output (box
     prompt), and the ViTMatte matte seeded by that mask is the paste weight.
@@ -146,16 +164,7 @@ def flux2_klein_add_object_with_box(
     edited, object_mask = _generate_with_retry(
         pool, cropped, box_mask, prompt, generate, debug
     )
-    result, matte = blend_edit(
-        pool,
-        original,
-        crop_box,
-        edited,
-        object_mask,
-        shadow=True,
-        ground_shadow=ground_shadow,
-        debug=debug,
-    )
+    result, matte = _paste(pool, original, crop_box, edited, object_mask, refine, debug)
     if debug is not None:
         debug.update(
             before=cropped,
@@ -175,11 +184,11 @@ def flux2_klein_add_object_with_mask(
     debug: dict | None = None,
     *,
     anchor: str | None = None,
-    ground_shadow: bool = False,
+    refine: bool = False,
 ) -> Image.Image:
     """Add an object at a white mask.
 
-    ``anchor`` and ``ground_shadow`` work as in ``flux2_klein_add_object_with_box``.
+    ``anchor`` and ``refine`` work as in ``flux2_klein_add_object_with_box``.
 
     Klein edits a crop around the mask; SAM3 segments the added object in its
     output, and the ViTMatte matte seeded by that mask is the paste weight.
@@ -225,16 +234,7 @@ def flux2_klein_add_object_with_mask(
     edited, object_mask = _generate_with_retry(
         pool, original_crop, object_mask, prompt, generate, debug
     )
-    result, matte = blend_edit(
-        pool,
-        original,
-        crop_box,
-        edited,
-        object_mask,
-        shadow=True,
-        ground_shadow=ground_shadow,
-        debug=debug,
-    )
+    result, matte = _paste(pool, original, crop_box, edited, object_mask, refine, debug)
     if debug is not None:
         debug.update(
             before=original_crop,

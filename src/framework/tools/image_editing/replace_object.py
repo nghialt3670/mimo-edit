@@ -57,11 +57,6 @@ def _validate_replace_object_args(
             "description": "With prompt: short placement phrase for what the new object rests on, e.g. 'on the wooden deck'. Inferred from the image if omitted.",
             "nullable": True,
         },
-        "ground_shadow": {
-            "type": "boolean",
-            "description": "With prompt: True when the new object stands on a surface, so a soft contact shadow is added if the model drew none.",
-            "nullable": True,
-        },
     },
     "image",
 )
@@ -72,7 +67,6 @@ def replace_object(
     replacement: Image.Image | None = None,
     prompt: str | None = None,
     anchor: str | None = None,
-    ground_shadow: bool | None = None,
 ) -> Image.Image:
     bounds = _validate_replace_object_args(image, mask, replacement, prompt)
     clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
@@ -85,7 +79,6 @@ def replace_object(
             bounds,
             prompt,
             anchor=anchor,
-            ground_shadow=bool(ground_shadow),
         )
 
     if replacement is None:
