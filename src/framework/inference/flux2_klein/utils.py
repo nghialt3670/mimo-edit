@@ -28,6 +28,7 @@ def generate_klein_edit(
     image: Image.Image,
     prompt: str,
     config: KleinInferenceConfig,
+    seed_offset: int = 0,
 ) -> Image.Image:
     with torch.inference_mode():
         return (
@@ -36,7 +37,9 @@ def generate_klein_edit(
                 prompt=prompt,
                 num_inference_steps=config.num_inference_steps,
                 guidance_scale=config.guidance_scale,
-                generator=torch.Generator(device="cpu").manual_seed(get_random_seed()),
+                generator=torch.Generator(device="cpu").manual_seed(
+                    get_random_seed() + seed_offset
+                ),
             )
             .images[0]
             .convert("RGB")
@@ -69,36 +72,83 @@ def binary_mask(mask: Image.Image) -> np.ndarray:
     return array >= (1 if int(array.max()) <= 1 else 128)
 
 
+class NothingAdded(RuntimeError):
+    """Klein's output has no new content, so there is nothing to paste."""
+
+
+def _changed_map(before: Image.Image, after: Image.Image, threshold: int) -> np.ndarray:
+    from scipy.ndimage import uniform_filter
+
+    delta = np.abs(
+        np.asarray(after, np.int16) - np.asarray(before.convert("RGB"), np.int16)
+    ).max(-1)
+    return uniform_filter(delta.astype(np.float32), size=5) > threshold
+
+
+def _largest_changes(changed: np.ndarray, keep: float = 0.1) -> np.ndarray:
+    """Close and fill the change map, keeping components of a real size."""
+    from scipy.ndimage import binary_closing, binary_fill_holes, label
+
+    closed = binary_fill_holes(binary_closing(changed, iterations=3))
+    labels, count = label(closed)
+    if count == 0:
+        return closed
+    sizes = np.bincount(labels.ravel())[1:]
+    keep_ids = 1 + np.nonzero(sizes >= keep * sizes.max())[0]
+    return np.isin(labels, keep_ids)
+
+
 def segment_added_object(
     pool,
     before: Image.Image,
     after: Image.Image,
     region: np.ndarray,
+    prompt: str | None = None,
     *,
-    min_changed: float = 0.3,
-    change_threshold: int = 12,
+    change_threshold: int = 20,
+    min_changed: float = 0.4,
+    min_area: float = 0.01,
+    debug: dict | None = None,
 ) -> np.ndarray:
-    """Mask of the object Klein added inside ``region`` (bool, crop coordinates).
+    """Mask of the object Klein added (bool, crop coordinates), never the whole box.
 
-    SAM3 segments ``after`` with the region's bounding box as prompt, so the
-    mask follows the new object instead of filling the box. It is kept only if
-    it really is new content: it must lie mostly inside the region and differ
-    from ``before`` on at least ``min_changed`` of its pixels. Otherwise the
-    whole region is returned, as before.
+    ``region`` is where the object was requested; the object may extend past it,
+    but its centre has to fall inside. Candidates come from SAM3 text masks of
+    ``prompt`` on ``after``, kept only if they are mostly new content (differ
+    from ``before``). Without a usable candidate the mask is the cleaned map of
+    changed pixels instead. If almost nothing changed, ``NothingAdded`` is raised.
     """
-    from ..sam3 import sam3_segment_mask
+    from scipy.ndimage import binary_dilation
 
+    changed = _changed_map(before, after, change_threshold)
+    if changed.mean() < 0.002:
+        raise NothingAdded("Klein's output is unchanged; no object was added")
     ys, xs = np.nonzero(region)
-    box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
-    mask = np.asarray(sam3_segment_mask(pool, after, box=box)) > 127
-    mask &= region
-    if mask.sum() < 0.02 * region.sum():
-        return region
-    delta = np.abs(
-        np.asarray(after, np.int16) - np.asarray(before.convert("RGB"), np.int16)
-    ).max(-1)
-    if float((delta[mask] > change_threshold).mean()) < min_changed:
-        return region
+    margin = max(8, int(0.25 * max(np.ptp(ys), np.ptp(xs) + 1)))
+    allowed = binary_dilation(region, iterations=margin)
+    total = float(region.size)
+    selected = np.zeros_like(region, bool)
+    if prompt and prompt.strip():
+        from ..sam3 import sam3_segment_masks
+
+        for candidate in sam3_segment_masks(pool, after, prompt, min_confidence=0.3):
+            mask = np.asarray(candidate) > 127
+            if mask.sum() < min_area * total:
+                continue
+            cy, cx = (int(v.mean()) for v in np.nonzero(mask))
+            if not allowed[cy, cx] or float(changed[mask].mean()) < min_changed:
+                continue
+            selected |= mask
+    if selected.any():
+        source = "text"
+        mask = selected
+    else:
+        source = "change"
+        mask = _largest_changes(changed & allowed)
+        if mask.sum() < min_area * total:
+            raise NothingAdded("no added object found in Klein's output")
+    if debug is not None:
+        debug["mask_source"] = source
     return mask
 
 

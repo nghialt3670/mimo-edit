@@ -15,11 +15,36 @@ from ..pool import ModelPool
 from .utils import (
     PADDING_FRAC,
     WORK_SIZE,
+    NothingAdded,
     binary_mask,
     blend_edit,
     generate_klein_edit,
     segment_added_object,
 )
+
+MIN_ASPECT = 0.5
+ATTEMPT_PROMPTS = (
+    "Add {prompt} that should be big and fit the whole image, preserving the surrounding context.",
+    "Clearly draw {prompt} as a distinct, fully visible object in this scene, preserving the surrounding context.",
+)
+
+
+def _generate_with_retry(pool, before, region, prompt, generate, debug):
+    """Generate and segment the new object, retrying once with another seed and wording."""
+    error: NothingAdded | None = None
+    for attempt in range(len(ATTEMPT_PROMPTS)):
+        edited = generate(attempt)
+        try:
+            mask = segment_added_object(
+                pool, before, edited, region, prompt, debug=debug
+            )
+        except NothingAdded as exc:
+            error = exc
+            continue
+        if debug is not None:
+            debug["attempt"] = attempt
+        return edited, mask
+    raise NothingAdded(f"{error} (tried {len(ATTEMPT_PROMPTS)} times: {prompt!r})")
 
 
 def flux2_klein_add_object_with_box(
@@ -58,6 +83,11 @@ def flux2_klein_add_object_with_box(
     # Klein sees real context when the box touches a border.
     cx1, cy1 = x1 - pad, y1 - pad
     cx2, cy2 = x2 + pad, y2 + pad
+    # Klein handles very flat or very thin crops badly, so grow the short side.
+    grow_x = max(0, math.ceil((cy2 - cy1) * MIN_ASPECT) - (cx2 - cx1))
+    grow_y = max(0, math.ceil((cx2 - cx1) * MIN_ASPECT) - (cy2 - cy1))
+    cx1, cx2 = cx1 - grow_x // 2, cx2 + grow_x - grow_x // 2
+    cy1, cy2 = cy1 - grow_y // 2, cy2 + grow_y - grow_y // 2
     shift_x = max(0, -cx1) - max(0, cx2 - width)
     shift_y = max(0, -cy1) - max(0, cy2 - height)
     crop_box = (
@@ -71,29 +101,37 @@ def flux2_klein_add_object_with_box(
     scale = WORK_SIZE / max(cw, ch)
     ww = max(64, round(cw * scale / 16) * 16)
     wh = max(64, round(ch * scale / 16) * 16)
-    with torch.inference_mode():
-        inference_config = pool.config.klein
-        edited = (
-            pipe(
-                image=cropped.resize((ww, wh), Image.Resampling.LANCZOS),
-                prompt=f"Add {prompt} that should be big and fit the whole image, preserving the surrounding context.",
-                height=wh,
-                width=ww,
-                num_inference_steps=inference_config.num_inference_steps,
-                guidance_scale=inference_config.guidance_scale,
-                generator=torch.Generator(device="cpu").manual_seed(get_random_seed()),
-            )
-            .images[0]
-            .convert("RGB")
-        )
-    if edited.size != (ww, wh):
-        raise ValueError(f"Klein returned {edited.size}, expected {(ww, wh)}")
-    edited = edited.resize((cw, ch), Image.Resampling.LANCZOS)
     box_mask = np.zeros((ch, cw), bool)
     box_mask[
         y1 - crop_box[1] : y2 - crop_box[1], x1 - crop_box[0] : x2 - crop_box[0]
     ] = True
-    object_mask = segment_added_object(pool, cropped, edited, box_mask)
+    inference_config = pool.config.klein
+    working = cropped.resize((ww, wh), Image.Resampling.LANCZOS)
+
+    def generate(attempt: int) -> Image.Image:
+        with torch.inference_mode():
+            out = (
+                pipe(
+                    image=working,
+                    prompt=ATTEMPT_PROMPTS[attempt].format(prompt=prompt),
+                    height=wh,
+                    width=ww,
+                    num_inference_steps=inference_config.num_inference_steps,
+                    guidance_scale=inference_config.guidance_scale,
+                    generator=torch.Generator(device="cpu").manual_seed(
+                        get_random_seed() + attempt
+                    ),
+                )
+                .images[0]
+                .convert("RGB")
+            )
+        if out.size != (ww, wh):
+            raise ValueError(f"Klein returned {out.size}, expected {(ww, wh)}")
+        return out.resize((cw, ch), Image.Resampling.LANCZOS)
+
+    edited, object_mask = _generate_with_retry(
+        pool, cropped, box_mask, prompt, generate, debug
+    )
     result, matte = blend_edit(
         pool, original, crop_box, edited, object_mask, debug=debug
     )
@@ -136,17 +174,27 @@ def flux2_klein_add_object_with_mask(
     )
     original_crop = original.crop(crop_box)
     working_image = ImageOps.contain(original_crop, (WORK_SIZE, WORK_SIZE))
-    edited = generate_klein_edit(
-        pool.flux2_klein_pipeline,
-        working_image,
-        f"Add {prompt} inside the selected region. Preserve the surroundings.",
-        inference_config,
-    )
-    if edited.size != working_image.size:
-        edited = edited.resize(working_image.size, Image.Resampling.LANCZOS)
-    edited = edited.resize(original_crop.size, Image.Resampling.LANCZOS)
     object_mask = binary_mask(mask.crop(crop_box))
-    object_mask = segment_added_object(pool, original_crop, edited, object_mask)
+    templates = (
+        "Add {prompt} inside the selected region. Preserve the surroundings.",
+        "Clearly draw {prompt} as a distinct, fully visible object inside the selected region. Preserve the surroundings.",
+    )
+
+    def generate(attempt: int) -> Image.Image:
+        out = generate_klein_edit(
+            pool.flux2_klein_pipeline,
+            working_image,
+            templates[attempt].format(prompt=prompt),
+            inference_config,
+            seed_offset=attempt,
+        )
+        if out.size != working_image.size:
+            out = out.resize(working_image.size, Image.Resampling.LANCZOS)
+        return out.resize(original_crop.size, Image.Resampling.LANCZOS)
+
+    edited, object_mask = _generate_with_retry(
+        pool, original_crop, object_mask, prompt, generate, debug
+    )
     result, matte = blend_edit(
         pool, original, crop_box, edited, object_mask, debug=debug
     )

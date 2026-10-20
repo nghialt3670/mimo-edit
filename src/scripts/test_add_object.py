@@ -31,6 +31,7 @@ from framework.inference.flux2_klein import (
     flux2_klein_add_object_with_mask,
     flux2_klein_remove_object,
 )
+from framework.inference.flux2_klein.utils import NothingAdded
 
 from .test_edit_object import (
     find_region,
@@ -140,14 +141,18 @@ def run_case(
         torch.manual_seed(args.seed)
         debug: dict = {}
         start = time.time()
-        if how == "box":
-            output = flux2_klein_add_object_with_box(
-                pool, base, box, case.prompt, debug=debug
-            )
-        else:
-            output = flux2_klein_add_object_with_mask(
-                pool, base, mask, case.prompt, debug=debug
-            )
+        try:
+            if how == "box":
+                output = flux2_klein_add_object_with_box(
+                    pool, base, box, case.prompt, debug=debug
+                )
+            else:
+                output = flux2_klein_add_object_with_mask(
+                    pool, base, mask, case.prompt, debug=debug
+                )
+        except NothingAdded as exc:
+            print(f"  [{how}] FAILED: {exc}")
+            continue
         print(f"  [{how}] {case.prompt!r}: {time.time() - start:.1f}s")
 
         stem = f"{name}_{how}"
