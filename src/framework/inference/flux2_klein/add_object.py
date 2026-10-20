@@ -12,6 +12,7 @@ from PIL import Image, ImageOps
 from framework.utils.randomness import get_random_seed
 
 from ..pool import ModelPool
+from .placement import GUIDE, placement
 from .utils import (
     PADDING_FRAC,
     WORK_SIZE,
@@ -24,8 +25,12 @@ from .utils import (
 
 MIN_ASPECT = 0.5
 ATTEMPT_PROMPTS = (
-    "Add {prompt} that should be big and fit the whole image, preserving the surrounding context.",
-    "Clearly draw {prompt} as a distinct, fully visible object in this scene, preserving the surrounding context.",
+    "Add {prompt}{where} that should be big and fit the whole image. {guide} Preserve the surrounding context.",
+    "Clearly draw {prompt}{where} as a distinct, fully visible object. {guide} Preserve the surrounding context.",
+)
+MASK_ATTEMPT_PROMPTS = (
+    "Add {prompt}{where} inside the selected region. {guide} Preserve the surroundings.",
+    "Clearly draw {prompt}{where} as a distinct, fully visible object inside the selected region. {guide} Preserve the surroundings.",
 )
 
 
@@ -53,8 +58,15 @@ def flux2_klein_add_object_with_box(
     box: Sequence[float],
     prompt: str,
     debug: dict | None = None,
+    *,
+    anchor: str | None = None,
+    ground_shadow: bool = False,
 ) -> Image.Image:
     """Add an object near an XYXY pixel box.
+
+    ``anchor`` is a placement phrase ("on the blue cooler") added to the prompt.
+    The object's cast shadow is carried over from Klein's output; with
+    ``ground_shadow`` a soft contact shadow is synthesised if Klein drew none.
 
     Klein edits the box crop; SAM3 segments the added object in its output (box
     prompt), and the ViTMatte matte seeded by that mask is the paste weight.
@@ -113,7 +125,9 @@ def flux2_klein_add_object_with_box(
             out = (
                 pipe(
                     image=working,
-                    prompt=ATTEMPT_PROMPTS[attempt].format(prompt=prompt),
+                    prompt=ATTEMPT_PROMPTS[attempt].format(
+                        prompt=prompt, where=placement(anchor), guide=GUIDE
+                    ),
                     height=wh,
                     width=ww,
                     num_inference_steps=inference_config.num_inference_steps,
@@ -133,10 +147,23 @@ def flux2_klein_add_object_with_box(
         pool, cropped, box_mask, prompt, generate, debug
     )
     result, matte = blend_edit(
-        pool, original, crop_box, edited, object_mask, debug=debug
+        pool,
+        original,
+        crop_box,
+        edited,
+        object_mask,
+        shadow=True,
+        ground_shadow=ground_shadow,
+        debug=debug,
     )
     if debug is not None:
-        debug.update(before=cropped, klein=edited, matte=matte, minimum=object_mask)
+        debug.update(
+            before=cropped,
+            klein=edited,
+            matte=matte,
+            minimum=object_mask,
+            anchor=anchor,
+        )
     return result
 
 
@@ -146,8 +173,13 @@ def flux2_klein_add_object_with_mask(
     mask: Image.Image,
     prompt: str,
     debug: dict | None = None,
+    *,
+    anchor: str | None = None,
+    ground_shadow: bool = False,
 ) -> Image.Image:
     """Add an object at a white mask.
+
+    ``anchor`` and ``ground_shadow`` work as in ``flux2_klein_add_object_with_box``.
 
     Klein edits a crop around the mask; SAM3 segments the added object in its
     output, and the ViTMatte matte seeded by that mask is the paste weight.
@@ -175,16 +207,14 @@ def flux2_klein_add_object_with_mask(
     original_crop = original.crop(crop_box)
     working_image = ImageOps.contain(original_crop, (WORK_SIZE, WORK_SIZE))
     object_mask = binary_mask(mask.crop(crop_box))
-    templates = (
-        "Add {prompt} inside the selected region. Preserve the surroundings.",
-        "Clearly draw {prompt} as a distinct, fully visible object inside the selected region. Preserve the surroundings.",
-    )
 
     def generate(attempt: int) -> Image.Image:
         out = generate_klein_edit(
             pool.flux2_klein_pipeline,
             working_image,
-            templates[attempt].format(prompt=prompt),
+            MASK_ATTEMPT_PROMPTS[attempt].format(
+                prompt=prompt, where=placement(anchor), guide=GUIDE
+            ),
             inference_config,
             seed_offset=attempt,
         )
@@ -196,10 +226,21 @@ def flux2_klein_add_object_with_mask(
         pool, original_crop, object_mask, prompt, generate, debug
     )
     result, matte = blend_edit(
-        pool, original, crop_box, edited, object_mask, debug=debug
+        pool,
+        original,
+        crop_box,
+        edited,
+        object_mask,
+        shadow=True,
+        ground_shadow=ground_shadow,
+        debug=debug,
     )
     if debug is not None:
         debug.update(
-            before=original_crop, klein=edited, matte=matte, minimum=object_mask
+            before=original_crop,
+            klein=edited,
+            matte=matte,
+            minimum=object_mask,
+            anchor=anchor,
         )
     return result

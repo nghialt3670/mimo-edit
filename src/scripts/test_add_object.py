@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run hard-coded add-object cases on the four MIRA-Bench samples.
+"""Run hard-coded add-object cases on the MIRA-Bench samples that have adds (10, 30, 57).
 
 Each case is a sample, a target (an annotated entity or a hand-picked box), a
 prompt, and optionally a removal first (replace = remove + add). Run any subset:
@@ -31,6 +31,7 @@ from framework.inference.flux2_klein import (
     flux2_klein_add_object_with_mask,
     flux2_klein_remove_object,
 )
+from framework.inference.flux2_klein.placement import describe_anchor
 from framework.inference.flux2_klein.utils import NothingAdded
 
 from .test_edit_object import (
@@ -50,29 +51,32 @@ class Case:
     # XYXY in the annotation's 1024-pixel space; used when there is no entity.
     box: tuple[int, int, int, int] | None = None
     remove_first: bool = False
+    # What the planner would pass: the placement phrase and whether the object stands on a surface.
+    anchor: str | None = None
+    ground_shadow: bool = False
     note: str = ""
 
 
 CASES: dict[str, Case] = {
-    "m4_dog_on_floor": Case(
-        "mirage:4.jpg",
-        "a small dog",
-        box=(300, 800, 620, 960),
-        note="no add in the annotation: hand-picked empty floor in front of the buckets",
-    ),
     "m10_dog_on_right_bench": Case(
-        "mirage:10.jpg", "a small dog", entity_id="e3", note="add a small dog onto v3"
+        "mirage:10.jpg",
+        "a small dog",
+        entity_id="e3",
+        anchor="sitting on the wooden bench on the right",
+        note="add a small dog onto v3",
     ),
     "m10_sticker_on_box": Case(
         "mirage:10.jpg",
         "a yellow sticker",
         entity_id="e5",
+        anchor="stuck on the front of the blue cooler",
         note="add a yellow sticker onto v5",
     ),
     "m30_roses_on_doormat": Case(
         "mirage:30.jpg",
         "a bunch of roses",
         entity_id="e4",
+        anchor="lying on the black doormat",
         note="add a bunch of roses onto v4",
     ),
     "m30_dog_replace_middle_cat": Case(
@@ -80,19 +84,17 @@ CASES: dict[str, Case] = {
         "a dog",
         entity_id="e3",
         remove_first=True,
+        anchor="sitting on the wet wooden deck between the two black cats",
+        ground_shadow=True,
         note="replace v3 with a dog",
-    ),
-    "m57_dragon_on_lifebuoy": Case(
-        "mirage:57.jpg",
-        "a dragon pattern",
-        entity_id="e4",
-        note="add a dragon pattern onto v4",
     ),
     "m57_dog_replace_rope": Case(
         "mirage:57.jpg",
         "a lying dog",
         entity_id="e5",
         remove_first=True,
+        anchor="lying on the concrete ground",
+        ground_shadow=True,
         note="replace v5 with a lying dog (touches two image edges)",
     ),
 }
@@ -141,14 +143,19 @@ def run_case(
         torch.manual_seed(args.seed)
         debug: dict = {}
         start = time.time()
+        anchor = case.anchor
+        if args.auto_anchor:
+            anchor = describe_anchor(base, box, case.prompt)
+            print(f"  auto anchor: {anchor!r}")
+        options = {"anchor": anchor, "ground_shadow": case.ground_shadow}
         try:
             if how == "box":
                 output = flux2_klein_add_object_with_box(
-                    pool, base, box, case.prompt, debug=debug
+                    pool, base, box, case.prompt, debug=debug, **options
                 )
             else:
                 output = flux2_klein_add_object_with_mask(
-                    pool, base, mask, case.prompt, debug=debug
+                    pool, base, mask, case.prompt, debug=debug, **options
                 )
         except NothingAdded as exc:
             print(f"  [{how}] FAILED: {exc}")
@@ -177,6 +184,11 @@ def main() -> None:
     parser.add_argument("cases", nargs="*", help="case names (see --list)")
     parser.add_argument("--list", action="store_true", help="list the cases and exit")
     parser.add_argument("--all", action="store_true", help="run every case")
+    parser.add_argument(
+        "--auto-anchor",
+        action="store_true",
+        help="ignore the hard-coded anchors and ask Gemini for each placement phrase",
+    )
     parser.add_argument(
         "--how",
         default="box",

@@ -9,6 +9,7 @@ from framework.inference import (
     flux2_klein_add_object_with_mask,
     mice_add_object_with_box,
 )
+from framework.inference.flux2_klein.placement import describe_anchor
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -44,7 +45,8 @@ def _validate_add_object_args(
 
 @register_tool(
     "add_object",
-    "Add an object to the image. Provide exactly one placement input: box or mask.",
+    "Add an object to the image. Provide exactly one placement input: box or mask. "
+    "Say in anchor what the object goes on or next to (for example 'on the blue cooler').",
     {
         "image": {
             "type": "image",
@@ -52,7 +54,17 @@ def _validate_add_object_args(
         },
         "prompt": {
             "type": "string",
-            "description": "Describe the object to add, including appearance and orientation.",
+            "description": "Describe the object to add, including appearance and orientation. Do not describe where it goes; use anchor for that.",
+        },
+        "anchor": {
+            "type": "string",
+            "description": "Short placement phrase: a preposition plus the object or surface the new object rests on or sits next to, e.g. 'on the wooden bench'. Inferred from the image if omitted.",
+            "nullable": True,
+        },
+        "ground_shadow": {
+            "type": "boolean",
+            "description": "True when the object stands on the ground or a surface, so a soft contact shadow is added if the model drew none. Leave false for stickers or decals.",
+            "nullable": True,
         },
         "box": {
             "type": "array",
@@ -73,10 +85,26 @@ def add_object(
     prompt: str,
     mask: Image.Image | None = None,
     box: list[float] | None = None,
+    anchor: str | None = None,
+    ground_shadow: bool | None = None,
 ) -> Image.Image:
     _validate_add_object_args(image, prompt, mask, box)
+    if anchor is not None:
+        validate_text("anchor", anchor)
+    if anchor is None:
+        region = (
+            tuple(int(v) for v in box)
+            if box is not None
+            else mask.convert("L").getbbox()
+        )
+        anchor = describe_anchor(image, region, prompt)
+    options = {"anchor": anchor, "ground_shadow": bool(ground_shadow)}
 
     if box is not None:
-        return flux2_klein_add_object_with_box(ctx.model_pool, image, box, prompt)
+        return flux2_klein_add_object_with_box(
+            ctx.model_pool, image, box, prompt, **options
+        )
 
-    return flux2_klein_add_object_with_mask(ctx.model_pool, image, mask, prompt)
+    return flux2_klein_add_object_with_mask(
+        ctx.model_pool, image, mask, prompt, **options
+    )

@@ -6,6 +6,7 @@ from framework.inference import (
     flux2_klein_add_object_with_box,
     flux2_klein_remove_object,
 )
+from framework.inference.flux2_klein.placement import describe_anchor
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -51,6 +52,16 @@ def _validate_replace_object_args(
             "description": "Optional description of the object Klein should add after the selected object is removed. Provide this or replacement, not both.",
             "nullable": True,
         },
+        "anchor": {
+            "type": "string",
+            "description": "With prompt: short placement phrase for what the new object rests on, e.g. 'on the wooden deck'. Inferred from the image if omitted.",
+            "nullable": True,
+        },
+        "ground_shadow": {
+            "type": "boolean",
+            "description": "With prompt: True when the new object stands on a surface, so a soft contact shadow is added if the model drew none.",
+            "nullable": True,
+        },
     },
     "image",
 )
@@ -60,11 +71,22 @@ def replace_object(
     mask: Image.Image,
     replacement: Image.Image | None = None,
     prompt: str | None = None,
+    anchor: str | None = None,
+    ground_shadow: bool | None = None,
 ) -> Image.Image:
     bounds = _validate_replace_object_args(image, mask, replacement, prompt)
     clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
     if prompt is not None:
-        return flux2_klein_add_object_with_box(ctx.model_pool, clean, bounds, prompt)
+        if anchor is None:
+            anchor = describe_anchor(clean, bounds, prompt)
+        return flux2_klein_add_object_with_box(
+            ctx.model_pool,
+            clean,
+            bounds,
+            prompt,
+            anchor=anchor,
+            ground_shadow=bool(ground_shadow),
+        )
 
     if replacement is None:
         raise RuntimeError("replacement or prompt must be provided")
