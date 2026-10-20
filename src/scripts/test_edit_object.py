@@ -32,10 +32,24 @@ ANNOTATION_ROOT = Path(".out/annotation/mira_bench")
 
 
 def latest_annotation_file() -> Path:
-    runs = sorted(ANNOTATION_ROOT.glob("run_*/mira_bench_mixed.jsonl"))
-    if not runs:
-        raise FileNotFoundError(f"No annotation run found under {ANNOTATION_ROOT}")
-    return runs[-1]
+    """Resolve the MIRA annotation file, honouring the same env vars as the notebooks."""
+    from framework.utils.project import load_project_environment
+
+    load_project_environment()
+    filename = "mira_bench_mixed.jsonl"
+    explicit = os.environ.get("MMEDIT_MIRA_BENCH_ANNOTATIONS")
+    if explicit:
+        return Path(explicit).expanduser()
+    root = Path(os.environ.get("ANNOTATE_OUT") or ANNOTATION_ROOT).expanduser()
+    run = os.environ.get("MMEDIT_MIRA_BENCH_ANNOTATION_RUN") or "latest"
+    runs = sorted(root.glob(f"run_*/{filename}"))
+    if run != "latest":
+        runs = [r for r in runs if r.parent.name == run]
+    if runs:
+        return runs[-1]
+    if (root / filename).is_file():
+        return root / filename
+    raise FileNotFoundError(f"No annotation run found under {root.resolve()}")
 
 
 def load_record(annotation_file: Path, sample_id: str) -> dict:

@@ -23,15 +23,9 @@ from PIL import Image, ImageDraw
 from framework.inference import InferenceConfig, ModelPool
 from framework.inference.flux2_klein import flux2_klein_remove_object
 
+from .test_edit_object import latest_annotation_file
+
 DATASET_ID = "ziqiangoodgood/MIRAGE"
-ANNOTATION_ROOT = Path(".out/annotation/mira_bench")
-
-
-def latest_annotation_file() -> Path:
-    runs = sorted(ANNOTATION_ROOT.glob("run_*/mira_bench_mixed.jsonl"))
-    if not runs:
-        raise FileNotFoundError(f"No annotation run found under {ANNOTATION_ROOT}")
-    return runs[-1]
 
 
 def load_record(annotation_file: Path, sample_id: str) -> dict:
