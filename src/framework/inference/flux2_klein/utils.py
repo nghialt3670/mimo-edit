@@ -69,6 +69,39 @@ def binary_mask(mask: Image.Image) -> np.ndarray:
     return array >= (1 if int(array.max()) <= 1 else 128)
 
 
+def segment_added_object(
+    pool,
+    before: Image.Image,
+    after: Image.Image,
+    region: np.ndarray,
+    *,
+    min_changed: float = 0.3,
+    change_threshold: int = 12,
+) -> np.ndarray:
+    """Mask of the object Klein added inside ``region`` (bool, crop coordinates).
+
+    SAM3 segments ``after`` with the region's bounding box as prompt, so the
+    mask follows the new object instead of filling the box. It is kept only if
+    it really is new content: it must lie mostly inside the region and differ
+    from ``before`` on at least ``min_changed`` of its pixels. Otherwise the
+    whole region is returned, as before.
+    """
+    from ..sam3 import sam3_segment_mask
+
+    ys, xs = np.nonzero(region)
+    box = [float(xs.min()), float(ys.min()), float(xs.max() + 1), float(ys.max() + 1)]
+    mask = np.asarray(sam3_segment_mask(pool, after, box=box)) > 127
+    mask &= region
+    if mask.sum() < 0.02 * region.sum():
+        return region
+    delta = np.abs(
+        np.asarray(after, np.int16) - np.asarray(before.convert("RGB"), np.int16)
+    ).max(-1)
+    if float((delta[mask] > change_threshold).mean()) < min_changed:
+        return region
+    return mask
+
+
 def harmonize_by_alpha(predictor, image: Image.Image, alpha: np.ndarray) -> Image.Image:
     """Harmonize with strength proportional to ``alpha`` (weak at the edge, full inside).
 

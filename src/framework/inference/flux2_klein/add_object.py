@@ -18,6 +18,7 @@ from .utils import (
     binary_mask,
     blend_edit,
     generate_klein_edit,
+    segment_added_object,
 )
 
 
@@ -30,8 +31,8 @@ def flux2_klein_add_object_with_box(
 ) -> Image.Image:
     """Add an object near an XYXY pixel box.
 
-    Klein edits the box crop; the ViTMatte matte of its output (trimap seeded
-    by the box) is the paste weight.
+    Klein edits the box crop; SAM3 segments the added object in its output (box
+    prompt), and the ViTMatte matte seeded by that mask is the paste weight.
     """
     pipe = pool.flux2_klein_pipeline
     if not isinstance(image, Image.Image):
@@ -92,9 +93,12 @@ def flux2_klein_add_object_with_box(
     box_mask[
         y1 - crop_box[1] : y2 - crop_box[1], x1 - crop_box[0] : x2 - crop_box[0]
     ] = True
-    result, matte = blend_edit(pool, original, crop_box, edited, box_mask, debug=debug)
+    object_mask = segment_added_object(pool, cropped, edited, box_mask)
+    result, matte = blend_edit(
+        pool, original, crop_box, edited, object_mask, debug=debug
+    )
     if debug is not None:
-        debug.update(before=cropped, klein=edited, matte=matte, minimum=box_mask)
+        debug.update(before=cropped, klein=edited, matte=matte, minimum=object_mask)
     return result
 
 
@@ -107,8 +111,8 @@ def flux2_klein_add_object_with_mask(
 ) -> Image.Image:
     """Add an object at a white mask.
 
-    Klein edits a crop around the mask; the ViTMatte matte of its output (trimap
-    seeded by the mask) is the paste weight.
+    Klein edits a crop around the mask; SAM3 segments the added object in its
+    output, and the ViTMatte matte seeded by that mask is the paste weight.
     """
     if not isinstance(image, Image.Image) or not isinstance(mask, Image.Image):
         raise TypeError("image and mask must both be PIL images")
@@ -142,6 +146,7 @@ def flux2_klein_add_object_with_mask(
         edited = edited.resize(working_image.size, Image.Resampling.LANCZOS)
     edited = edited.resize(original_crop.size, Image.Resampling.LANCZOS)
     object_mask = binary_mask(mask.crop(crop_box))
+    object_mask = segment_added_object(pool, original_crop, edited, object_mask)
     result, matte = blend_edit(
         pool, original, crop_box, edited, object_mask, debug=debug
     )

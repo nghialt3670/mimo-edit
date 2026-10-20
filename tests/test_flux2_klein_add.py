@@ -42,6 +42,10 @@ class Flux2KleinAddTests(unittest.TestCase):
                 side_effect=lambda _p, image, _m: image,
             ),
             patch(
+                "framework.inference.flux2_klein.add_object.segment_added_object",
+                side_effect=lambda _pool, _before, _after, region: region,
+            ),
+            patch(
                 "framework.inference.flux2_klein.utils.vitmatte_alpha",
                 side_effect=lambda _pool, _img, m: m,
             ),
