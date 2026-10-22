@@ -1,0 +1,791 @@
+{
+  "benchmark": "mira_bench",
+  "sample_id": "mirage:57.jpg",
+  "annotation_index": 3,
+  "model_id": "gemini-3.5-flash",
+  "instruction": "Change the material of <box_0> to leather, and change the color of <box_1> to blue, and remove <box_2>, and add a dragon pattern onto <box_3>, and replace <box_4> with a lying dog.",
+  "reference_prompts": [
+    {
+      "token": "<box_0>",
+      "annotation_token": "<v1>",
+      "variable": "box_0",
+      "type": "box",
+      "value": [
+        16.0,
+        477.0,
+        307.0,
+        838.0
+      ]
+    },
+    {
+      "token": "<box_1>",
+      "annotation_token": "<v2>",
+      "variable": "box_1",
+      "type": "box",
+      "value": [
+        250.0,
+        324.0,
+        501.0,
+        592.0
+      ]
+    },
+    {
+      "token": "<box_2>",
+      "annotation_token": "<v3>",
+      "variable": "box_2",
+      "type": "box",
+      "value": [
+        739.0,
+        414.0,
+        997.0,
+        735.0
+      ]
+    },
+    {
+      "token": "<box_3>",
+      "annotation_token": "<v4>",
+      "variable": "box_3",
+      "type": "box",
+      "value": [
+        545.0,
+        352.0,
+        759.0,
+        635.0
+      ]
+    },
+    {
+      "token": "<box_4>",
+      "annotation_token": "<v5>",
+      "variable": "box_4",
+      "type": "box",
+      "value": [
+        0.0,
+        887.0,
+        565.0,
+        1024.0
+      ]
+    }
+  ],
+  "random_seed": 42,
+  "status": "completed",
+  "error": null,
+  "traceback": null,
+  "elapsed_seconds": 28.78,
+  "agent_elapsed_seconds": 27.91,
+  "agent_trajectory": [
+    {
+      "observation": {
+        "type": "user_message",
+        "text": "Change the material of <box_0> to leather, and change the color of <box_1> to blue, and remove <box_2>, and add a dragon pattern onto <box_3>, and replace <box_4> with a lying dog.",
+        "objects": [
+          "image_0",
+          "box_0",
+          "box_1",
+          "box_2",
+          "box_3",
+          "box_4"
+        ]
+      }
+    },
+    {
+      "thought": "Segment each object specified by the boxes and perform the requested edits sequentially: change material of box_0 to leather, change color of box_1 to blue, remove box_2, add a dragon pattern onto box_3, and replace box_4 with a lying dog.",
+      "act": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])"
+    }
+  ],
+  "agent_raw_steps": [
+    {
+      "task": "{\"type\": \"user_message\", \"text\": \"Change the material of <box_0> to leather, and change the color of <box_1> to blue, and remove <box_2>, and add a dragon pattern onto <box_3>, and replace <box_4> with a lying dog.\", \"objects\": [\"image_0\", \"box_0\", \"box_1\", \"box_2\", \"box_3\", \"box_4\"]}",
+      "task_images": null
+    },
+    {
+      "step_number": 1,
+      "timing": {
+        "start_time": 1792503581.228645,
+        "end_time": 1792503609.1402872,
+        "duration": 27.91164207458496
+      },
+      "model_input_messages": [
+        {
+          "role": "system",
+          "content": [
+            {
+              "type": "text",
+              "text": "You are a code-action agent operating in a repeated Observation -> Thought -> Act loop.\n\nAn Observation is JSON. A user observation has this form:\n{\"type\":\"user_message\",\"text\":\"...\",\"objects\":[\"image_0\",\"point_0\", ...]}\n\nThe `objects` entries are Python variable names already bound in your persistent execution\nnamespace. Use those variables directly. When placeholders are present, each names the exact\nsupplied variable, such as `<point_0>` for `point_0` or `<box_1>` for `box_1`. Variables you\ncreate in code persist across later steps and later user turns. Never invent a variable that has\nnot appeared in an Observation or been created by your own earlier code.\n\nUse the registered tools for image operations; do not import Pillow or other unauthorized\nmodules. If text segmentation finds no match, do not repeat near-identical prompts: try\n`segment_region` with a concise visible-object description, or use a provided visual anchor\nwith `segment_object`'s point, box, or scribble input. Before calling `add_object` with a box,\nensure its four coordinates are finite, ordered as `[x1, y1, x2, y2]`, and within the image\nbounds (use `image.size` for its width and height); prefer a supplied box or mask over guessed\ncoordinates.\n\nAt every agent step you MUST produce exactly two structured fields:\n- `thought`: one concise plain-text reasoning string describing the next action.\n- `code`: valid Python implementing that action.\n\nThe framework enforces this structured Thought + Code output. Do not omit `thought`.\nRegistered tools behave like ordinary Python functions. Assign useful intermediate outputs to\nclear names such as `mask_0`, `image_1`, and `image_2`.\n\nWhen the CURRENT USER TURN is complete, terminate the turn with:\n    send_message(text=\"...\", objects=[...])\n\n`send_message` immediately returns that message to the user. It does NOT end the conversation.\nThe next item in the loop, if the user replies, will be a new user-message Observation. Do not\nproduce another execution Observation after send_message. Put actual Python objects in `objects`,\nnot variable names as strings. Never call `final_answer`; it is an internal implementation detail.\n\nAvailable functions:\n```python\ndef add_object(image: image, prompt: string, anchor: string, box: array, mask: image) -> image:\n    \"\"\"Add an object to the image. Provide exactly one placement input: box or mask. Say in anchor what the object goes on or next to (for example 'on the blue cooler').\n\n    Args:\n        image: Image to edit.\n        prompt: Describe the object to add, including appearance and orientation. Do not describe where it goes; use anchor for that.\n        anchor: Short placement phrase: a preposition plus the object or surface the new object rests on or sits next to, e.g. 'on the wooden bench'. Inferred from the image if omitted.\n        box: Approximate placement box [x1, y1, x2, y2] in image pixels.\n        mask: Mask the same size as the image; white marks where to add the object.\n    \"\"\"\n\ndef apply_filter(image: image, filter_name: string, value: number, mask: image) -> image:\n    \"\"\"Apply a filter to the image or blend it into a masked area.\n\n    Args:\n        image: Image to edit.\n        filter_name: Filter: brightness, contrast, saturation, blackWhite, invert, or blur.\n        value: Filter strength from -1 to 1.\n        mask: Optional mask for the area to filter; omit to filter the whole image.\n    \"\"\"\n\ndef edit_object(image: image, mask: image, prompt: string, mode: string, padding: number) -> image:\n    \"\"\"Edit the selected object. Describe the desired change and choose how much of the surrounding image may change.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object to edit.\n        prompt: Describe the intended change and preserve details the user did not ask to change. For color changes say to keep the texture, material and lighting.\n        mode: 'local' keeps the object's shape; 'regional' allows nearby changes; 'global' allows changes across the image.\n        padding: Optional regional padding from 0 to 1. Defaults to 0.25.\n    \"\"\"\n\ndef flip_object(image: image, mask: image, axis: string) -> image:\n    \"\"\"Flip the selected object horizontally or vertically.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        axis: 'x' for horizontal; 'y' for vertical.\n    \"\"\"\n\ndef move_object(image: image, mask: image, target: array) -> image:\n    \"\"\"Move the selected object to a new location.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        target: Destination pixel [x, y] or box [x1, y1, x2, y2].\n    \"\"\"\n\ndef remove_object(image: image, mask: image) -> image:\n    \"\"\"Remove the selected object from the image.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object to remove.\n    \"\"\"\n\ndef replace_object(image: image, mask: image, replacement: image, prompt: string, anchor: string) -> image:\n    \"\"\"Replace the selected object either with a supplied replacement image or with an object described by a text prompt, which Klein swaps in directly.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object to replace.\n        replacement: Optional replacement image to fit into the selected object's bounds. Provide this or prompt, not both.\n        prompt: Optional description of the object Klein should put in place of the selected object. Provide this or replacement, not both.\n        anchor: With prompt: short placement phrase for what the new object rests on, e.g. 'on the wooden deck'. Inferred from the image if omitted.\n    \"\"\"\n\ndef rotate_object(image: image, mask: image, angle: number) -> image:\n    \"\"\"Rotate the selected object counterclockwise.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        angle: Rotation angle in degrees.\n    \"\"\"\n\ndef scale_object(image: image, mask: image, factor: number) -> image:\n    \"\"\"Scale the selected object around its center.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        factor: Scale factor; above 1 enlarges and below 1 shrinks.\n    \"\"\"\n\ndef segment_object(image: image, text: string, point: array, box: array, scribble: array) -> image:\n    \"\"\"Select an object by text, point, box, or scribble and return its mask.\n\n    Args:\n        image: Image containing the object.\n        text: Description of the object to select. Use only one selection method.\n        point: Pixel point [x, y] on the object. Use only one selection method.\n        box: Pixel box [x1, y1, x2, y2] around the object. Use only one selection method.\n        scribble: Pixel path [[x, y], ...] drawn over the object. Use only one selection method.\n    \"\"\"\n\ndef segment_region(image: image, prompt: string) -> image:\n    \"\"\"Find a region described in natural language and return a precise object mask.\n\n    Args:\n        image: Image containing the region.\n        prompt: Natural-language description of the object or region to segment.\n    \"\"\"\n\ndef shift_object(image: image, mask: image, offset: array) -> image:\n    \"\"\"Shift the selected object by a pixel offset.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        offset: Pixel offset [dx, dy].\n    \"\"\"\n\ndef send_message(text: string, objects: array) -> object:\n    \"\"\"Send text and optional Python objects to the user, ending only the current turn.\n\n    Args:\n        text: Text to send to the user.\n        objects: Actual Python objects to attach, e.g. [image_2].\n    \"\"\"\n\n\n```\n\nAuthorized imports: ['collections', 'datetime', 'itertools', 'math', 'queue', 'random', 're', 'stat', 'statistics', 'time', 'unicodedata']\nAdditional instructions / few-shot exemplars:\nUse image_0 as the source image. Follow the user instruction and return the final edited image.\nWhen the instruction contains a visual placeholder such as <point_0>, <box_1>, or <scribble_2>, use the exactly matching variable bound in the observation; do not infer a variable from placeholder order. For each reference to an existing entity, call segment_object with its single supplied selector to create a mask before editing. A spatial destination is not an existing entity: use its supplied box directly with add_object, without calling segment_object. Never use annotation masks or crops. Do not combine selector types for one reference. Apply edits to each required object in sequence and preserve unrelated image content.\nChoose edit_object mode intentionally: local for appearance-only changes, regional for identity/shape/accessory changes near the object, global only when surrounding scene changes are requested. Its prompt must describe the requested transformation, not just the desired category: for example, for 'Let the man with longer curly hair, wearing a loose tie be a woman,' say 'Transform the selected man into a woman, keeping his longer curly hair, loose tie, and pose.' Include all requested attributes and preserve unmentioned details. Use other registered tools when they better match the requested operation.\nReference <box_0> use box selector variable box_0.\nReference <box_1> use box selector variable box_1.\nReference <box_2> use box selector variable box_2.\nReference <box_3> use box selector variable box_3.\nReference <box_4> use box selector variable box_4.\nDo not invent selector coordinates."
+            }
+          ],
+          "tool_calls": null,
+          "raw": null,
+          "token_usage": null
+        },
+        {
+          "role": "user",
+          "content": [
+            {
+              "type": "text",
+              "text": "Observation:\n{\"type\": \"user_message\", \"text\": \"Change the material of <box_0> to leather, and change the color of <box_1> to blue, and remove <box_2>, and add a dragon pattern onto <box_3>, and replace <box_4> with a lying dog.\", \"objects\": [\"image_0\", \"box_0\", \"box_1\", \"box_2\", \"box_3\", \"box_4\"]}"
+            }
+          ],
+          "tool_calls": null,
+          "raw": null,
+          "token_usage": null
+        }
+      ],
+      "tool_calls": [
+        {
+          "id": "call_1",
+          "type": "function",
+          "function": {
+            "name": "python_interpreter",
+            "arguments": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])"
+          }
+        }
+      ],
+      "error": null,
+      "model_output_message": {
+        "role": "assistant",
+        "content": {
+          "thought": "Segment each object specified by the boxes and perform the requested edits sequentially: change material of box_0 to leather, change color of box_1 to blue, remove box_2, add a dragon pattern onto box_3, and replace box_4 with a lying dog.",
+          "code": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])"
+        },
+        "tool_calls": null,
+        "raw": {
+          "_type": "ChatCompletion",
+          "id": "HW_XaoXgH9XknsEP8azjgQc",
+          "choices": [
+            {
+              "_type": "Choice",
+              "finish_reason": "stop",
+              "index": 0,
+              "logprobs": null,
+              "message": {
+                "_type": "ChatCompletionMessage",
+                "content": {
+                  "thought": "Segment each object specified by the boxes and perform the requested edits sequentially: change material of box_0 to leather, change color of box_1 to blue, remove box_2, add a dragon pattern onto box_3, and replace box_4 with a lying dog.",
+                  "code": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])"
+                },
+                "refusal": null,
+                "role": "assistant",
+                "annotations": null,
+                "audio": null,
+                "function_call": null,
+                "tool_calls": null
+              }
+            }
+          ],
+          "created": 1792503588,
+          "model": "gemini-3.5-flash",
+          "object": "chat.completion",
+          "metadata": null,
+          "moderation": null,
+          "service_tier": null,
+          "system_fingerprint": null,
+          "usage": {
+            "_type": "CompletionUsage",
+            "completion_tokens": 395,
+            "prompt_tokens": 2357,
+            "total_tokens": 3833,
+            "completion_tokens_details": null,
+            "prompt_tokens_details": null
+          },
+          "_request_id": null
+        },
+        "token_usage": {
+          "input_tokens": 2357,
+          "output_tokens": 395,
+          "total_tokens": 2752
+        }
+      },
+      "model_output": "{\n  \"thought\": \"Segment each object specified by the boxes and perform the requested edits sequentially: change material of box_0 to leather, change color of box_1 to blue, remove box_2, add a dragon pattern onto box_3, and replace box_4 with a lying dog.\",\n  \"code\": \"mask_0 = segment_object(image_0, box=box_0)\\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\\\"Change the material of the object to leather, keeping its shape and lighting.\\\", mode=\\\"local\\\", padding=0.25)\\n\\nmask_1 = segment_object(image_1, box=box_1)\\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\\\"Change the color of the object to blue, keeping its texture, material, and lighting.\\\", mode=\\\"local\\\", padding=0.25)\\n\\nmask_2 = segment_object(image_2, box=box_2)\\nimage_3 = remove_object(image_2, mask=mask_2)\\n\\nmask_3 = segment_object(image_3, box=box_3)\\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\\\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\\\", mode=\\\"local\\\", padding=0.25)\\n\\nmask_4 = segment_object(image_4, box=box_4)\\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\\\"a lying dog\\\")\\n\\nsend_message(text=\\\"I have completed all the requested edits on the image.\\\", objects=[image_5])\"\n}",
+      "code_action": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])",
+      "observations": null,
+      "observations_images": null,
+      "action_output": {
+        "text": "I have completed all the requested edits on the image.",
+        "objects": [
+          {
+            "_type": "Image",
+            "_im": "<ImagingCore object at 0x779ed879aa90>",
+            "_mode": "RGB",
+            "_size": [
+              1024,
+              1024
+            ],
+            "palette": null,
+            "info": {},
+            "_readonly": 0,
+            "_exif": null
+          }
+        ]
+      },
+      "token_usage": {
+        "input_tokens": 2357,
+        "output_tokens": 395,
+        "total_tokens": 2752
+      },
+      "is_final_answer": true
+    }
+  ],
+  "agent_timings": {
+    "prompt_builds": [
+      {
+        "step": 1,
+        "duration_seconds": 1.617701491340995e-05,
+        "message_count": 2,
+        "text_characters": 9684
+      }
+    ],
+    "llm_calls": [
+      {
+        "step": 1,
+        "input_tokens": 2357,
+        "output_tokens": 395,
+        "status": "completed",
+        "duration_seconds": 7.346315296977991
+      }
+    ],
+    "tool_calls": [
+      {
+        "tool": "segment_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 0.3844563360034954
+      },
+      {
+        "tool": "edit_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 2.07586472001276
+      },
+      {
+        "tool": "segment_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 0.13911994398222305
+      },
+      {
+        "tool": "edit_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 2.048700237995945
+      },
+      {
+        "tool": "segment_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 0.13666894697234966
+      },
+      {
+        "tool": "remove_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 4.2746469840058126
+      },
+      {
+        "tool": "segment_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 0.13673915300751105
+      },
+      {
+        "tool": "edit_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 1.665769986982923
+      },
+      {
+        "tool": "segment_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 0.13667471200460568
+      },
+      {
+        "tool": "replace_object",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 9.556499033002183
+      },
+      {
+        "tool": "send_message",
+        "step": 1,
+        "status": "completed",
+        "duration_seconds": 8.663017069920897e-06
+      }
+    ]
+  },
+  "agent_timing_totals": {
+    "prompt_build_seconds": 0.0,
+    "llm_call_seconds": 7.3463,
+    "tool_call_seconds": 20.5551
+  },
+  "raw_trajectory_path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/agent_raw_trajectory.json",
+  "agent_variables": {
+    "image_0": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_image_0_f34e6debf2.png",
+      "mode": "RGB",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "box_0": [
+      16.0,
+      477.0,
+      307.0,
+      838.0
+    ],
+    "box_1": [
+      250.0,
+      324.0,
+      501.0,
+      592.0
+    ],
+    "box_2": [
+      739.0,
+      414.0,
+      997.0,
+      735.0
+    ],
+    "box_3": [
+      545.0,
+      352.0,
+      759.0,
+      635.0
+    ],
+    "box_4": [
+      0.0,
+      887.0,
+      565.0,
+      1024.0
+    ],
+    "mask_0": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_mask_0_d35564990d.png",
+      "mode": "L",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "image_1": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_image_1_f96f469879.png",
+      "mode": "RGB",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "mask_1": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_mask_1_093cf2c456.png",
+      "mode": "L",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "image_2": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_image_2_c2a6e293e5.png",
+      "mode": "RGB",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "mask_2": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_mask_2_f4aac06353.png",
+      "mode": "L",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "image_3": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_image_3_2e5d4d8e02.png",
+      "mode": "RGB",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "mask_3": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_mask_3_b6b8eb7808.png",
+      "mode": "L",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "image_4": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_image_4_3bbbf9ce2c.png",
+      "mode": "RGB",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "mask_4": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_mask_4_7a29e76583.png",
+      "mode": "L",
+      "size": [
+        1024,
+        1024
+      ]
+    },
+    "image_5": {
+      "__type__": "PIL.Image",
+      "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/variables_image_5_c960ab78a6.png",
+      "mode": "RGB",
+      "size": [
+        1024,
+        1024
+      ]
+    }
+  },
+  "turn_result_raw": {
+    "__type__": "RunResult",
+    "output": {
+      "text": "I have completed all the requested edits on the image.",
+      "objects": [
+        {
+          "__type__": "PIL.Image",
+          "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000003_mirage_57.jpg/debug_assets/raw_turn_result_raw_output_objects_0_e8a77592b4.png",
+          "mode": "RGB",
+          "size": [
+            1024,
+            1024
+          ]
+        }
+      ]
+    },
+    "state": "success",
+    "steps": [
+      {
+        "task": "{\"type\": \"user_message\", \"text\": \"Change the material of <box_0> to leather, and change the color of <box_1> to blue, and remove <box_2>, and add a dragon pattern onto <box_3>, and replace <box_4> with a lying dog.\", \"objects\": [\"image_0\", \"box_0\", \"box_1\", \"box_2\", \"box_3\", \"box_4\"]}",
+        "task_images": null
+      },
+      {
+        "step_number": 1,
+        "timing": {
+          "start_time": 1792503581.228645,
+          "end_time": 1792503609.1402872,
+          "duration": 27.91164207458496
+        },
+        "model_input_messages": [
+          {
+            "role": "system",
+            "content": [
+              {
+                "type": "text",
+                "text": "You are a code-action agent operating in a repeated Observation -> Thought -> Act loop.\n\nAn Observation is JSON. A user observation has this form:\n{\"type\":\"user_message\",\"text\":\"...\",\"objects\":[\"image_0\",\"point_0\", ...]}\n\nThe `objects` entries are Python variable names already bound in your persistent execution\nnamespace. Use those variables directly. When placeholders are present, each names the exact\nsupplied variable, such as `<point_0>` for `point_0` or `<box_1>` for `box_1`. Variables you\ncreate in code persist across later steps and later user turns. Never invent a variable that has\nnot appeared in an Observation or been created by your own earlier code.\n\nUse the registered tools for image operations; do not import Pillow or other unauthorized\nmodules. If text segmentation finds no match, do not repeat near-identical prompts: try\n`segment_region` with a concise visible-object description, or use a provided visual anchor\nwith `segment_object`'s point, box, or scribble input. Before calling `add_object` with a box,\nensure its four coordinates are finite, ordered as `[x1, y1, x2, y2]`, and within the image\nbounds (use `image.size` for its width and height); prefer a supplied box or mask over guessed\ncoordinates.\n\nAt every agent step you MUST produce exactly two structured fields:\n- `thought`: one concise plain-text reasoning string describing the next action.\n- `code`: valid Python implementing that action.\n\nThe framework enforces this structured Thought + Code output. Do not omit `thought`.\nRegistered tools behave like ordinary Python functions. Assign useful intermediate outputs to\nclear names such as `mask_0`, `image_1`, and `image_2`.\n\nWhen the CURRENT USER TURN is complete, terminate the turn with:\n    send_message(text=\"...\", objects=[...])\n\n`send_message` immediately returns that message to the user. It does NOT end the conversation.\nThe next item in the loop, if the user replies, will be a new user-message Observation. Do not\nproduce another execution Observation after send_message. Put actual Python objects in `objects`,\nnot variable names as strings. Never call `final_answer`; it is an internal implementation detail.\n\nAvailable functions:\n```python\ndef add_object(image: image, prompt: string, anchor: string, box: array, mask: image) -> image:\n    \"\"\"Add an object to the image. Provide exactly one placement input: box or mask. Say in anchor what the object goes on or next to (for example 'on the blue cooler').\n\n    Args:\n        image: Image to edit.\n        prompt: Describe the object to add, including appearance and orientation. Do not describe where it goes; use anchor for that.\n        anchor: Short placement phrase: a preposition plus the object or surface the new object rests on or sits next to, e.g. 'on the wooden bench'. Inferred from the image if omitted.\n        box: Approximate placement box [x1, y1, x2, y2] in image pixels.\n        mask: Mask the same size as the image; white marks where to add the object.\n    \"\"\"\n\ndef apply_filter(image: image, filter_name: string, value: number, mask: image) -> image:\n    \"\"\"Apply a filter to the image or blend it into a masked area.\n\n    Args:\n        image: Image to edit.\n        filter_name: Filter: brightness, contrast, saturation, blackWhite, invert, or blur.\n        value: Filter strength from -1 to 1.\n        mask: Optional mask for the area to filter; omit to filter the whole image.\n    \"\"\"\n\ndef edit_object(image: image, mask: image, prompt: string, mode: string, padding: number) -> image:\n    \"\"\"Edit the selected object. Describe the desired change and choose how much of the surrounding image may change.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object to edit.\n        prompt: Describe the intended change and preserve details the user did not ask to change. For color changes say to keep the texture, material and lighting.\n        mode: 'local' keeps the object's shape; 'regional' allows nearby changes; 'global' allows changes across the image.\n        padding: Optional regional padding from 0 to 1. Defaults to 0.25.\n    \"\"\"\n\ndef flip_object(image: image, mask: image, axis: string) -> image:\n    \"\"\"Flip the selected object horizontally or vertically.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        axis: 'x' for horizontal; 'y' for vertical.\n    \"\"\"\n\ndef move_object(image: image, mask: image, target: array) -> image:\n    \"\"\"Move the selected object to a new location.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        target: Destination pixel [x, y] or box [x1, y1, x2, y2].\n    \"\"\"\n\ndef remove_object(image: image, mask: image) -> image:\n    \"\"\"Remove the selected object from the image.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object to remove.\n    \"\"\"\n\ndef replace_object(image: image, mask: image, replacement: image, prompt: string, anchor: string) -> image:\n    \"\"\"Replace the selected object either with a supplied replacement image or with an object described by a text prompt, which Klein swaps in directly.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object to replace.\n        replacement: Optional replacement image to fit into the selected object's bounds. Provide this or prompt, not both.\n        prompt: Optional description of the object Klein should put in place of the selected object. Provide this or replacement, not both.\n        anchor: With prompt: short placement phrase for what the new object rests on, e.g. 'on the wooden deck'. Inferred from the image if omitted.\n    \"\"\"\n\ndef rotate_object(image: image, mask: image, angle: number) -> image:\n    \"\"\"Rotate the selected object counterclockwise.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        angle: Rotation angle in degrees.\n    \"\"\"\n\ndef scale_object(image: image, mask: image, factor: number) -> image:\n    \"\"\"Scale the selected object around its center.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        factor: Scale factor; above 1 enlarges and below 1 shrinks.\n    \"\"\"\n\ndef segment_object(image: image, text: string, point: array, box: array, scribble: array) -> image:\n    \"\"\"Select an object by text, point, box, or scribble and return its mask.\n\n    Args:\n        image: Image containing the object.\n        text: Description of the object to select. Use only one selection method.\n        point: Pixel point [x, y] on the object. Use only one selection method.\n        box: Pixel box [x1, y1, x2, y2] around the object. Use only one selection method.\n        scribble: Pixel path [[x, y], ...] drawn over the object. Use only one selection method.\n    \"\"\"\n\ndef segment_region(image: image, prompt: string) -> image:\n    \"\"\"Find a region described in natural language and return a precise object mask.\n\n    Args:\n        image: Image containing the region.\n        prompt: Natural-language description of the object or region to segment.\n    \"\"\"\n\ndef shift_object(image: image, mask: image, offset: array) -> image:\n    \"\"\"Shift the selected object by a pixel offset.\n\n    Args:\n        image: Image to edit.\n        mask: Mask selecting the object.\n        offset: Pixel offset [dx, dy].\n    \"\"\"\n\ndef send_message(text: string, objects: array) -> object:\n    \"\"\"Send text and optional Python objects to the user, ending only the current turn.\n\n    Args:\n        text: Text to send to the user.\n        objects: Actual Python objects to attach, e.g. [image_2].\n    \"\"\"\n\n\n```\n\nAuthorized imports: ['collections', 'datetime', 'itertools', 'math', 'queue', 'random', 're', 'stat', 'statistics', 'time', 'unicodedata']\nAdditional instructions / few-shot exemplars:\nUse image_0 as the source image. Follow the user instruction and return the final edited image.\nWhen the instruction contains a visual placeholder such as <point_0>, <box_1>, or <scribble_2>, use the exactly matching variable bound in the observation; do not infer a variable from placeholder order. For each reference to an existing entity, call segment_object with its single supplied selector to create a mask before editing. A spatial destination is not an existing entity: use its supplied box directly with add_object, without calling segment_object. Never use annotation masks or crops. Do not combine selector types for one reference. Apply edits to each required object in sequence and preserve unrelated image content.\nChoose edit_object mode intentionally: local for appearance-only changes, regional for identity/shape/accessory changes near the object, global only when surrounding scene changes are requested. Its prompt must describe the requested transformation, not just the desired category: for example, for 'Let the man with longer curly hair, wearing a loose tie be a woman,' say 'Transform the selected man into a woman, keeping his longer curly hair, loose tie, and pose.' Include all requested attributes and preserve unmentioned details. Use other registered tools when they better match the requested operation.\nReference <box_0> use box selector variable box_0.\nReference <box_1> use box selector variable box_1.\nReference <box_2> use box selector variable box_2.\nReference <box_3> use box selector variable box_3.\nReference <box_4> use box selector variable box_4.\nDo not invent selector coordinates."
+              }
+            ],
+            "tool_calls": null,
+            "raw": null,
+            "token_usage": null
+          },
+          {
+            "role": "user",
+            "content": [
+              {
+                "type": "text",
+                "text": "Observation:\n{\"type\": \"user_message\", \"text\": \"Change the material of <box_0> to leather, and change the color of <box_1> to blue, and remove <box_2>, and add a dragon pattern onto <box_3>, and replace <box_4> with a lying dog.\", \"objects\": [\"image_0\", \"box_0\", \"box_1\", \"box_2\", \"box_3\", \"box_4\"]}"
+              }
+            ],
+            "tool_calls": null,
+            "raw": null,
+            "token_usage": null
+          }
+        ],
+        "tool_calls": [
+          {
+            "id": "call_1",
+            "type": "function",
+            "function": {
+              "name": "python_interpreter",
+              "arguments": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])"
+            }
+          }
+        ],
+        "error": null,
+        "model_output_message": {
+          "role": "assistant",
+          "content": {
+            "thought": "Segment each object specified by the boxes and perform the requested edits sequentially: change material of box_0 to leather, change color of box_1 to blue, remove box_2, add a dragon pattern onto box_3, and replace box_4 with a lying dog.",
+            "code": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])"
+          },
+          "tool_calls": null,
+          "raw": {
+            "_type": "ChatCompletion",
+            "id": "HW_XaoXgH9XknsEP8azjgQc",
+            "choices": [
+              {
+                "_type": "Choice",
+                "finish_reason": "stop",
+                "index": 0,
+                "logprobs": null,
+                "message": {
+                  "_type": "ChatCompletionMessage",
+                  "content": {
+                    "thought": "Segment each object specified by the boxes and perform the requested edits sequentially: change material of box_0 to leather, change color of box_1 to blue, remove box_2, add a dragon pattern onto box_3, and replace box_4 with a lying dog.",
+                    "code": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])"
+                  },
+                  "refusal": null,
+                  "role": "assistant",
+                  "annotations": null,
+                  "audio": null,
+                  "function_call": null,
+                  "tool_calls": null
+                }
+              }
+            ],
+            "created": 1792503588,
+            "model": "gemini-3.5-flash",
+            "object": "chat.completion",
+            "metadata": null,
+            "moderation": null,
+            "service_tier": null,
+            "system_fingerprint": null,
+            "usage": {
+              "_type": "CompletionUsage",
+              "completion_tokens": 395,
+              "prompt_tokens": 2357,
+              "total_tokens": 3833,
+              "completion_tokens_details": null,
+              "prompt_tokens_details": null
+            },
+            "_request_id": null
+          },
+          "token_usage": {
+            "input_tokens": 2357,
+            "output_tokens": 395,
+            "total_tokens": 2752
+          }
+        },
+        "model_output": "{\n  \"thought\": \"Segment each object specified by the boxes and perform the requested edits sequentially: change material of box_0 to leather, change color of box_1 to blue, remove box_2, add a dragon pattern onto box_3, and replace box_4 with a lying dog.\",\n  \"code\": \"mask_0 = segment_object(image_0, box=box_0)\\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\\\"Change the material of the object to leather, keeping its shape and lighting.\\\", mode=\\\"local\\\", padding=0.25)\\n\\nmask_1 = segment_object(image_1, box=box_1)\\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\\\"Change the color of the object to blue, keeping its texture, material, and lighting.\\\", mode=\\\"local\\\", padding=0.25)\\n\\nmask_2 = segment_object(image_2, box=box_2)\\nimage_3 = remove_object(image_2, mask=mask_2)\\n\\nmask_3 = segment_object(image_3, box=box_3)\\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\\\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\\\", mode=\\\"local\\\", padding=0.25)\\n\\nmask_4 = segment_object(image_4, box=box_4)\\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\\\"a lying dog\\\")\\n\\nsend_message(text=\\\"I have completed all the requested edits on the image.\\\", objects=[image_5])\"\n}",
+        "code_action": "mask_0 = segment_object(image_0, box=box_0)\nimage_1 = edit_object(image_0, mask=mask_0, prompt=\"Change the material of the object to leather, keeping its shape and lighting.\", mode=\"local\", padding=0.25)\n\nmask_1 = segment_object(image_1, box=box_1)\nimage_2 = edit_object(image_1, mask=mask_1, prompt=\"Change the color of the object to blue, keeping its texture, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_2 = segment_object(image_2, box=box_2)\nimage_3 = remove_object(image_2, mask=mask_2)\n\nmask_3 = segment_object(image_3, box=box_3)\nimage_4 = edit_object(image_3, mask=mask_3, prompt=\"Add a dragon pattern onto the object, preserving its shape, material, and lighting.\", mode=\"local\", padding=0.25)\n\nmask_4 = segment_object(image_4, box=box_4)\nimage_5 = replace_object(image_4, mask=mask_4, prompt=\"a lying dog\")\n\nsend_message(text=\"I have completed all the requested edits on the image.\", objects=[image_5])",
+        "observations": null,
+        "observations_images": null,
+        "action_output": {
+          "text": "I have completed all the requested edits on the image.",
+          "objects": [
+            {
+              "_type": "Image",
+              "_im": "<ImagingCore object at 0x779ed879aa90>",
+              "_mode": "RGB",
+              "_size": [
+                1024,
+                1024
+              ],
+              "palette": null,
+              "info": {},
+              "_readonly": 0,
+              "_exif": null
+            }
+          ]
+        },
+        "token_usage": {
+          "input_tokens": 2357,
+          "output_tokens": 395,
+          "total_tokens": 2752
+        },
+        "is_final_answer": true
+      }
+    ],
+    "token_usage": {
+      "__type__": "TokenUsage",
+      "input_tokens": 2357,
+      "output_tokens": 395,
+      "total_tokens": 2752
+    },
+    "timing": {
+      "__type__": "Timing",
+      "start_time": 1792503581.2286432,
+      "end_time": 1792503609.1408298
+    }
+  },
+  "message": "I have completed all the requested edits on the image.",
+  "reference_record": {
+    "sample_id": "mirage:57.jpg",
+    "benchmark": "MIRA-Bench",
+    "split": "test",
+    "original_instruction": "Change the material of the first lifebuoy from the left to leather, and change the color of the second lifebuoy from the left to blue, and remove the first lifebuoy from the right, and add a dragon pattern onto the second lifebuoy from the right, and replace the rope on the ground in the lower-left corner with a lying dog.",
+    "mixed_instruction": "Change the material of <v1> to leather, and change the color of <v2> to blue, and remove <v3>, and add a dragon pattern onto <v4>, and replace <v5> with a lying dog.",
+    "references": [
+      {
+        "token": "<v1>",
+        "entity_id": "e1",
+        "span": "the first lifebuoy from the left",
+        "start": 23,
+        "end": 55,
+        "role": "target",
+        "grounding_query": "the first red lifebuoy on the left",
+        "region": {
+          "bbox_xyxy": [
+            16.0,
+            477.0,
+            307.0,
+            838.0
+          ],
+          "image_size": [
+            1024,
+            1024
+          ],
+          "confidence": 1.0,
+          "label": "the first red lifebuoy on the left",
+          "source": "benchmark_mask:object_instance",
+          "crop_path": "assets/mira_bench_mixed/mirage_57.jpg/e1_crop.png",
+          "mask_path": "assets/mira_bench_mixed/mirage_57.jpg/e1_mask.png"
+        }
+      },
+      {
+        "token": "<v2>",
+        "entity_id": "e2",
+        "span": "the second lifebuoy from the left",
+        "start": 92,
+        "end": 125,
+        "role": "target",
+        "grounding_query": "the second lifebuoy from the left leaning against the wall",
+        "region": {
+          "bbox_xyxy": [
+            250.0,
+            324.0,
+            501.0,
+            592.0
+          ],
+          "image_size": [
+            1024,
+            1024
+          ],
+          "confidence": 1.0,
+          "label": "the second lifebuoy from the left leaning against the wall",
+          "source": "benchmark_mask:object_instance",
+          "crop_path": "assets/mira_bench_mixed/mirage_57.jpg/e2_crop.png",
+          "mask_path": "assets/mira_bench_mixed/mirage_57.jpg/e2_mask.png"
+        }
+      },
+      {
+        "token": "<v3>",
+        "entity_id": "e3",
+        "span": "the first lifebuoy from the right",
+        "start": 146,
+        "end": 179,
+        "role": "target",
+        "grounding_query": "the rightmost lifebuoy leaning against the bench",
+        "region": {
+          "bbox_xyxy": [
+            739.0,
+            414.0,
+            997.0,
+            735.0
+          ],
+          "image_size": [
+            1024,
+            1024
+          ],
+          "confidence": 1.0,
+          "label": "the rightmost lifebuoy leaning against the bench",
+          "source": "benchmark_mask:object_instance",
+          "crop_path": "assets/mira_bench_mixed/mirage_57.jpg/e3_crop.png",
+          "mask_path": "assets/mira_bench_mixed/mirage_57.jpg/e3_mask.png"
+        }
+      },
+      {
+        "token": "<v4>",
+        "entity_id": "e4",
+        "span": "the second lifebuoy from the right",
+        "start": 211,
+        "end": 245,
+        "role": "anchor",
+        "grounding_query": "the orange lifebuoy, second from the right",
+        "region": {
+          "bbox_xyxy": [
+            545.0,
+            352.0,
+            759.0,
+            635.0
+          ],
+          "image_size": [
+            1024,
+            1024
+          ],
+          "confidence": 1.0,
+          "label": "the orange lifebuoy, second from the right",
+          "source": "benchmark_mask:object_instance",
+          "crop_path": "assets/mira_bench_mixed/mirage_57.jpg/e4_crop.png",
+          "mask_path": "assets/mira_bench_mixed/mirage_57.jpg/e4_mask.png"
+        }
+      },
+      {
+        "token": "<v5>",
+        "entity_id": "e5",
+        "span": "the rope on the ground in the lower-left corner",
+        "start": 259,
+        "end": 306,
+        "role": "target",
+        "grounding_query": "the coiled rope on the ground in the lower-left corner",
+        "region": {
+          "bbox_xyxy": [
+            0.0,
+            887.0,
+            565.0,
+            1024.0
+          ],
+          "image_size": [
+            1024,
+            1024
+          ],
+          "confidence": 1.0,
+          "label": "the coiled rope on the ground in the lower-left corner",
+          "source": "benchmark_mask:object_instance",
+          "crop_path": "assets/mira_bench_mixed/mirage_57.jpg/e5_crop.png",
+          "mask_path": "assets/mira_bench_mixed/mirage_57.jpg/e5_mask.png"
+        }
+      }
+    ],
+    "parser_instruction": "Change the material of the first lifebuoy from the left to leather, and change the color of the second lifebuoy from the left to blue, and remove the first lifebuoy from the right, and add a dragon pattern onto the second lifebuoy from the right, and replace the rope on the ground in the lower-left corner with a lying dog.",
+    "source_ref": "hf://ziqiangoodgood/MIRAGE/benchmark/57.jpg",
+    "target_ref": null,
+    "metadata": {
+      "row_index": 57,
+      "image": "57.jpg",
+      "mask_kind": "object_instance",
+      "mask_guidance_used": true,
+      "mask_guidance_reasons": [
+        "mira_bench_reference_masks"
+      ]
+    },
+    "linguistic_stats": {
+      "original_words": 60,
+      "mixed_words": 27,
+      "reference_words_removed": 33,
+      "reduction": 0.55
+    },
+    "validation": {
+      "pass": true,
+      "tokens": [
+        "<v1>",
+        "<v2>",
+        "<v3>",
+        "<v4>",
+        "<v5>"
+      ],
+      "reference_tokens": [
+        "<v1>",
+        "<v2>",
+        "<v3>",
+        "<v4>",
+        "<v5>"
+      ],
+      "boxes_valid": true,
+      "source_target_preserved": true
+    }
+  }
+}

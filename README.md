@@ -77,13 +77,15 @@ tools = image_editing_tools(
             num_inference_steps=4,
             guidance_scale=1.0,
             mask_context_padding=64,
+            remove_lora="fal",  # or "slopshop" for erase-v1
         ),
     )
 )
 ```
 
 `KleinInferenceConfig` controls the shared edit/generation step count,
-guidance scale, and context padding around masked generation.
+guidance scale, context padding around masked generation, and which
+object-removal LoRA `remove_object` uses (`fal` or `slopshop`).
 The inference config defaults to 4 steps and guidance scale `1.0`, matching
 Black Forest Labs' FLUX.2 Klein 4B example.
 Masked generation crops around the selected region with 64 pixels of context by

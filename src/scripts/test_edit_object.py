@@ -22,10 +22,12 @@ import torch
 from PIL import Image, ImageDraw
 
 from framework.inference import InferenceConfig, ModelPool
-from framework.inference.flux2_klein import flux2_klein_edit_object
+from framework.inference.flux2_klein import flux2_klein_edit_object, flux2_klein_remove_object
+from framework.inference.sam3 import sam3_segment_mask
+from framework.utils.randomness import seed_random_generators
 
 DEFAULT_PROMPTS = [
-    "Change the color of the left cat to blue",
+    "Change the color of the object to blue",
 ]
 DATASET_ID = "ziqiangoodgood/MIRAGE"
 ANNOTATION_ROOT = Path(".out/annotation/mira_bench")
@@ -110,6 +112,9 @@ def save_debug(debug: dict, folder: Path) -> None:
     gray(debug["matte"]).save(folder / "matte_raw.png")
     debug["harmonized"].save(folder / "after_harmonize.png")
     debug["composite"].save(folder / "composite_before_harmonize.png")
+    for key in ("semantic_heat", "paste_weight"):
+        if key in debug:
+            debug[key].save(folder / f"{key}.png")
     if "refined" in debug:
         debug["refined"].save(folder / "after_klein_refine.png")
         debug["refined_raw"].save(folder / "klein_refine_raw.png")
@@ -135,38 +140,78 @@ def main() -> None:
     parser.add_argument(
         "--output-dir", type=Path, default=Path(".out/debug/edit_object")
     )
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--steps", type=int, default=None, help="Override Klein steps")
+    parser.add_argument(
+        "--use-agent-flow",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Mimic agent execution up to edit_object (SAM segmentation + remove_object prior step)",
+    )
+    parser.add_argument(
+        "--skip-remove",
+        action="store_true",
+        default=False,
+        help="Opt out of the remove_object step to isolate whether remove_object caused the degradation",
+    )
     args = parser.parse_args()
     prompts = args.prompt or DEFAULT_PROMPTS
 
+    # Set RANDOM_SEED environment variable and initialize all RNGs exactly like agent eval
+    os.environ["RANDOM_SEED"] = str(args.seed)
+    seed_random_generators()
+
     annotation_file = args.annotation_file or latest_annotation_file()
     record = load_record(annotation_file, args.sample_id)
-    reference = find_region(record, args.entity_id)
-    mask_path = annotation_file.parent / reference["region"]["mask_path"]
-    print(f"editing {reference['entity_id']}: {reference['span']!r} ({mask_path})")
+    ref_e1 = find_region(record, "e1")
+    ref_e2 = find_region(record, "e2")
+
+    box_0 = ref_e1["region"]["bbox_xyxy"]  # right cat: [620, 300, 917, 713]
+    box_1 = ref_e2["region"]["bbox_xyxy"]  # left cat:  [75, 199, 301, 737]
 
     source = load_source_image(record)
-    with Image.open(mask_path) as mask_file:
-        mask = mask_file.convert("L")
-    if mask.size != source.size:
-        mask = mask.resize(source.size, Image.Resampling.NEAREST)
-
     pool = ModelPool(InferenceConfig())
     if args.steps is not None:
         object.__setattr__(pool.config.klein, "num_inference_steps", args.steps)
 
+    if args.use_agent_flow:
+        print("=== Mimicking Real Agent Workflow ===")
+        if args.skip_remove:
+            print("[Agent Step 1] SKIPPED (--skip-remove)")
+            current_image = source
+        else:
+            # Step 1: mask_0 = segment_object(image_0, box=box_0)
+            print(f"[Agent Step 1a] segment_object box_0: {box_0}")
+            mask_0 = sam3_segment_mask(pool, source, box=box_0)
+
+            # Step 1: image_1 = remove_object(image_0, mask_0)
+            print("[Agent Step 1b] remove_object(image_0, mask_0)")
+            current_image = flux2_klein_remove_object(pool, source, mask_0)
+
+        # Step 2: mask_1 = segment_object(image_1, box=box_1)
+        print(f"[Agent Step 2a] segment_object box_1: {box_1}")
+        mask_1 = sam3_segment_mask(pool, current_image, box=box_1)
+
+        input_image = current_image
+        edit_mask = mask_1
+    else:
+        print("=== Direct Isolated Edit Mode ===")
+        mask_path = annotation_file.parent / ref_e2["region"]["mask_path"]
+        with Image.open(mask_path) as mask_file:
+            edit_mask = mask_file.convert("L")
+        if edit_mask.size != source.size:
+            edit_mask = edit_mask.resize(source.size, Image.Resampling.NEAREST)
+        input_image = source
+
     outputs = []
     debugs = []
     for index, prompt in enumerate(prompts):
-        # Same seed for every prompt so only the wording differs.
-        torch.manual_seed(args.seed)
         start = time.time()
         debug: dict = {}
         output = flux2_klein_edit_object(
             pool,
-            source,
-            mask,
+            input_image,
+            edit_mask,
             prompt,
             mode=args.mode,
             padding=args.padding,
@@ -177,12 +222,12 @@ def main() -> None:
         debugs.append(debug)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    stem = f"{args.sample_id.replace(':', '_')}_{reference['entity_id']}_{args.mode}"
-    overlay = source.copy()
-    tint = Image.new("RGB", source.size, (255, 0, 255))
-    overlay.paste(tint, mask=mask.point(lambda v: 90 if v >= 128 else 0))
-    images = [source, overlay, *outputs]
-    titles = ["source", "mask", *(f"prompt {i}" for i in range(len(outputs)))]
+    stem = f"{args.sample_id.replace(':', '_')}_{args.entity_id}_{args.mode}"
+    overlay = input_image.copy()
+    tint = Image.new("RGB", input_image.size, (255, 0, 255))
+    overlay.paste(tint, mask=edit_mask.point(lambda v: 90 if v >= 128 else 0))
+    images = [source, input_image, overlay, *outputs]
+    titles = ["source", "input", "mask", *(f"prompt {i}" for i in range(len(outputs)))]
     panel = Image.new("RGB", (source.width * len(images), source.height))
     for index, (image, title) in enumerate(zip(images, titles)):
         panel.paste(labelled(image, title), (index * source.width, 0))

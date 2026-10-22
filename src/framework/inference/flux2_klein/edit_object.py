@@ -1,4 +1,4 @@
-"""Edit an existing object with FLUX.2 Klein."""
+"""Edit an existing object with FLUX.2 Klein 4B and a consistency LoRA."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from ..utils import validate_number_range
 from .utils import binary_mask, blend_edit, generate_klein_edit
 
 # Context Klein sees around the object in local mode (fraction of the bbox, >= 16px).
-LOCAL_CONTEXT = 0.2
+LOCAL_CONTEXT = 0.1
 
 
 # Distilled Klein follows short, positive descriptions better than "don't" lists.
@@ -35,14 +35,14 @@ def _editing_prompt(
             "Edit only the selected object's appearance. Preserve its identity, "
             "silhouette, geometry, size, position, and pose. Do not add or remove "
             "parts. Keep everything outside the selected object unchanged. "
-            + COMPLETE_AND_REALISTIC
+            
         )
     elif mode == "regional":
         instructions = (
             "Edit the selected object and allow the requested change to extend into "
             "the padded area around it, including changes to its silhouette, size, "
             "or additions such as accessories. Keep image content outside that "
-            "nearby edit area unchanged. " + COMPLETE_AND_REALISTIC
+            "nearby edit area unchanged. " 
         )
     else:
         instructions = (
@@ -62,15 +62,19 @@ def flux2_klein_edit_object(
     *,
     mode: Literal["local", "regional", "global"] = "local",
     padding: float = 0.2,
+    lora_strength: float = 0.6,
     debug: dict | None = None,
 ) -> Image.Image:
-    """Edit one masked object with Klein and paste it back with a ViTMatte matte.
+    """Edit the masked object using the FLUX.2 Klein 4B consistency LoRA.
 
-    - ``global``: the whole image goes to Klein and its result is returned.
-    - ``local`` / ``regional``: Klein edits a crop around the object (extra
-      context in local mode, ``padding`` of the bbox in regional mode). The
-      matte of Klein's output, with a trimap seeded by the mask, is the paste
-      weight; nothing else is applied.
+    The consistency LoRA is loaded once onto the shared Klein pipeline and
+    only switched on for this call. Removal keeps its own named adapter;
+    neither call unloads the other. Set ``lora_strength=0`` to run the base
+    model for A/B comparisons.
+
+    ``local`` crops around the object and restricts pasted changes to the mask.
+    ``regional`` allows surrounding changes through semantic-difference blending.
+    ``global`` returns the full Klein-generated image.
     """
     if not isinstance(image, Image.Image):
         raise TypeError("image must be a Pillow image")
@@ -83,6 +87,8 @@ def flux2_klein_edit_object(
     if mode not in ("local", "regional", "global"):
         raise ValueError("mode must be 'local', 'regional', or 'global'")
     validate_number_range("padding", padding, 0, 1)
+    validate_number_range("lora_strength", lora_strength, 0, 1)
+
     mask = mask.convert("L")
     bounds = mask.getbbox()
     if bounds is None:
@@ -96,7 +102,9 @@ def flux2_klein_edit_object(
     config = pool.config.klein
 
     if mode == "global":
-        edited = generate_klein_edit(pipeline, current, instruction, config)
+        edited = generate_klein_edit(
+            pipeline, current, instruction, config, lora_strength=lora_strength
+        )
         if edited.size != current.size:
             edited = edited.resize(current.size, Image.Resampling.LANCZOS)
         return edited
@@ -112,9 +120,10 @@ def flux2_klein_edit_object(
         min(image.width, right + margin_x),
         min(image.height, bottom + margin_y),
     )
-
     before = current.crop(crop_box)
-    after = generate_klein_edit(pipeline, before, instruction, config)
+    after = generate_klein_edit(
+        pipeline, before, instruction, config, lora_strength=lora_strength
+    )
     if after.size != before.size:
         after = after.resize(before.size, Image.Resampling.LANCZOS)
 

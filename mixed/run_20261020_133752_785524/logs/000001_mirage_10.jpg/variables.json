@@ -1,0 +1,113 @@
+{
+  "image_0": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_image_0_f34e6debf2.png",
+    "mode": "RGB",
+    "size": [
+      1024,
+      1024
+    ]
+  },
+  "box_0": [
+    0.0,
+    301.0,
+    313.0,
+    746.0
+  ],
+  "box_1": [
+    345.0,
+    435.0,
+    659.0,
+    747.0
+  ],
+  "box_2": [
+    701.0,
+    293.0,
+    932.0,
+    595.0
+  ],
+  "box_3": [
+    80.0,
+    758.0,
+    488.0,
+    957.0
+  ],
+  "box_4": [
+    635.0,
+    628.0,
+    979.0,
+    922.0
+  ],
+  "mask_0": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_mask_0_d35564990d.png",
+    "mode": "L",
+    "size": [
+      1024,
+      1024
+    ]
+  },
+  "image_1": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_image_1_f96f469879.png",
+    "mode": "RGB",
+    "size": [
+      1024,
+      1024
+    ]
+  },
+  "mask_1": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_mask_1_093cf2c456.png",
+    "mode": "L",
+    "size": [
+      1024,
+      1024
+    ]
+  },
+  "image_2": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_image_2_c2a6e293e5.png",
+    "mode": "RGB",
+    "size": [
+      1024,
+      1024
+    ]
+  },
+  "image_3": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_image_3_2e5d4d8e02.png",
+    "mode": "RGB",
+    "size": [
+      1024,
+      1024
+    ]
+  },
+  "mask_3": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_mask_3_b6b8eb7808.png",
+    "mode": "L",
+    "size": [
+      1024,
+      1024
+    ]
+  },
+  "image_4": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_image_4_3bbbf9ce2c.png",
+    "mode": "RGB",
+    "size": [
+      1024,
+      1024
+    ]
+  },
+  "image_5": {
+    "__type__": "PIL.Image",
+    "path": "/workspace/mimo-edit/results/mira_bench/mixed/run_20261020_133752_785524/logs/000001_mirage_10.jpg/debug_assets/variables_image_5_c960ab78a6.png",
+    "mode": "RGB",
+    "size": [
+      1024,
+      1024
+    ]
+  }
+}

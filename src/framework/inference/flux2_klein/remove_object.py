@@ -1,72 +1,26 @@
-"""Remove an object: classical inpaint fill, then FLUX.2 Klein + removal LoRA."""
+"""Remove an object with FLUX.2 Klein and a selectable removal LoRA."""
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import cv2
 import numpy as np
-import torch
 from PIL import Image, ImageChops, ImageFilter
 from scipy.ndimage import maximum_filter
 
-from framework.utils.randomness import get_random_seed
-
 from ..pool import ModelPool
 from ..utils import validate_number_range
+from .lora import (
+    REMOVE_LORAS,
+    generate_klein,
+    load_remove_prompt_embeds,
+    remove_lora_spec,
+    validated_object_remove_lora_path,
+)
 from .shadow import find_shadow_mask
 from .utils import WORK_SIZE, harmonize_with_mask
 
-REMOVE_PROMPT = "Remove the highlighted object from the scene"
+REMOVE_PROMPT = REMOVE_LORAS["fal"].prompt
 HIGHLIGHT_COLOR = (255, 0, 255)
-
-OBJECT_REMOVE_LORA_REPO = "fal/flux-2-klein-4B-object-remove-lora"
-# The 58 MB flux-object-remove-lora.safetensors upload is incomplete upstream.
-# Use the validated, 76 MB ComfyUI-converted checkpoint instead. Diffusers'
-# Flux2 LoRA loader converts its diffusion_model.* keys automatically.
-OBJECT_REMOVE_LORA_WEIGHT = (
-    "kDEkt5q7tDLKOpQJIVMPx_" "pytorch_lora_weights_comfy_converted.safetensors"
-)
-
-
-def _validated_object_remove_lora_path(repo_or_path: str, weight_name: str) -> Path:
-    """Resolve a Hub or local checkpoint and reject unreadable safetensors.
-
-    Do not retry a malformed checkpoint: the original 58 MB upstream upload
-    is known to have missing tensor data and redownloading cannot repair it.
-    """
-    from safetensors import safe_open
-
-    location = Path(repo_or_path).expanduser()
-    if location.is_file():
-        checkpoint = location
-    elif location.is_dir():
-        checkpoint = location / weight_name
-    else:
-        from huggingface_hub import hf_hub_download
-
-        checkpoint = Path(hf_hub_download(repo_id=repo_or_path, filename=weight_name))
-
-    if not checkpoint.is_file():
-        raise FileNotFoundError(f"LoRA checkpoint not found: {checkpoint}")
-
-    try:
-        with safe_open(str(checkpoint), framework="pt", device="cpu") as reader:
-            keys = list(reader.keys())
-            if not keys:
-                raise ValueError("checkpoint contains no tensors")
-            if checkpoint.name == OBJECT_REMOVE_LORA_WEIGHT and not all(
-                key.startswith("diffusion_model.") for key in keys
-            ):
-                raise ValueError("unexpected keys in the 76 MB object-removal LoRA")
-    except Exception as exc:
-        raise RuntimeError(
-            f"Unreadable object-removal LoRA checkpoint: {checkpoint}. "
-            "The original 58 MB checkpoint is incomplete upstream. "
-            f"Use {OBJECT_REMOVE_LORA_WEIGHT} from {OBJECT_REMOVE_LORA_REPO}."
-        ) from exc
-
-    return checkpoint
 
 
 def _poisson_blend(
@@ -143,11 +97,12 @@ def flux2_klein_remove_object(
     protection_mask: Image.Image | None = None,
     context_padding: float = 1.5,
     mask_padding_ratio: float = 0.05,
-    prompt: str = REMOVE_PROMPT,
+    prompt: str | None = None,
     highlight_opacity: float = 0.65,
-    lora_scale: float = 1.3,
-    lora_repo: str = OBJECT_REMOVE_LORA_REPO,
-    lora_weight: str = OBJECT_REMOVE_LORA_WEIGHT,
+    lora: str | None = None,
+    lora_scale: float | None = None,
+    lora_repo: str | None = None,
+    lora_weight: str | None = None,
     feather_px: int = 24,
     harmonize: bool = False,
     include_shadow: bool = False,
@@ -155,17 +110,18 @@ def flux2_klein_remove_object(
 ) -> Image.Image:
     """Remove the white region of ``mask``.
 
+    ``lora`` selects the removal adapter: ``fal`` (magenta highlight on a
+    Telea fill) or ``slopshop`` (erase-v1: original photo plus RGB mask).
+    When omitted, ``pool.config.klein.remove_lora`` is used. Each adapter is
+    loaded once under its own name and switched on for this call.
+
     1. Crop the image around the mask (plus context). With ``include_shadow``
        the object's cast shadow (SAM3 "shadow", or a luminance heuristic as
        fallback) is added to the removal mask.
-    2. Stage 1: erase the mask with OpenCV inpainting, which guarantees no trace
-       of the object (even flat ones Klein keeps) but leaves a smeared patch.
-    3. Stage 2: highlight the filled area in magenta and run Klein
-       with the object-remove LoRA to turn the smear into clean background.
-       The LoRA adapter is temporary and deleted in a finally block.
-    4. Harmonize the filled mask region with PCT-Net (``harmonize``).
-    5. Poisson-blend the patch into the original so its boundary has no tone jump.
-    6. Paste the result back through the feathered mask, so pixels away from the
+    2. Run Klein with the selected LoRA protocol.
+    3. Harmonize the filled mask region with PCT-Net (``harmonize``).
+    4. Poisson-blend the patch into the original so its boundary has no tone jump.
+    5. Paste the result back through the feathered mask, so pixels away from the
        object are never changed. ``protection_mask`` marks pixels that must stay
        original even when they overlap the dilated mask.
     """
@@ -181,9 +137,14 @@ def flux2_klein_remove_object(
         raise ValueError(
             "protection_mask must be a Pillow image the same size as image"
         )
+    spec = remove_lora_spec(lora if lora is not None else pool.config.klein.remove_lora)
+    adapter_weight = spec.scale if lora_scale is None else lora_scale
+    repo = spec.repo if lora_repo is None else lora_repo
+    weight_name = spec.weight if lora_weight is None else lora_weight
+    instruction = spec.prompt if prompt is None else prompt
     validate_number_range("context_padding", context_padding, 0, 4)
     validate_number_range("mask_padding_ratio", mask_padding_ratio, 0, 0.5)
-    validate_number_range("lora_scale", lora_scale, 0, 2)
+    validate_number_range("lora_scale", adapter_weight, 0, 2)
     validate_number_range("highlight_opacity", highlight_opacity, 0.1, 1.0)
     if not isinstance(feather_px, int) or not 0 <= feather_px <= 64:
         raise ValueError("feather_px must be an integer from 0 to 64")
@@ -219,6 +180,12 @@ def flux2_klein_remove_object(
     )
     crop = original.crop(box)
     crop_mask = edit_mask.crop(box)
+    extra = round(spec.mask_grow_frac * max(crop.size))
+    if extra:
+        crop_mask = Image.fromarray(
+            maximum_filter(np.asarray(crop_mask), size=2 * extra + 1, mode="constant"),
+            "L",
+        )
     if include_shadow:
         shadow = find_shadow_mask(pool, crop, _binary(mask.crop(box)))
         if protected is not None:
@@ -233,59 +200,30 @@ def flux2_klein_remove_object(
     work_image = crop.resize((ww, wh), Image.Resampling.LANCZOS)
     work_mask = crop_mask.resize((ww, wh), Image.Resampling.NEAREST)
 
-    filled = _classical_fill(work_image, work_mask)
-    annotated = _highlight(filled, work_mask, highlight_opacity)
-
-    pipe = pool.flux2_klein_pipeline
-    required = (
-        "load_lora_weights",
-        "set_adapters",
-        "delete_adapters",
-        "get_active_adapters",
-    )
-    if any(not callable(getattr(pipe, attr, None)) for attr in required):
-        raise RuntimeError(
-            "The Klein pipeline needs load_lora_weights, set_adapters, "
-            "delete_adapters and get_active_adapters (recent diffusers + peft)."
+    if spec.highlight:
+        klein_image: Image.Image | list[Image.Image] = _highlight(
+            _classical_fill(work_image, work_mask), work_mask, highlight_opacity
         )
-    if pipe.get_active_adapters():
-        raise RuntimeError("The shared Klein pipeline already has active LoRA adapters")
-    adapter_name = "_object_remove_temporary"
-    checkpoint = _validated_object_remove_lora_path(lora_repo, lora_weight)
-    config = pool.config.klein
-    try:
-        try:
-            pipe.load_lora_weights(
-                str(checkpoint.parent),
-                weight_name=checkpoint.name,
-                adapter_name=adapter_name,
-            )
-        except Exception as exc:
-            raise RuntimeError(
-                f"Diffusers failed to load the removal LoRA: {checkpoint}"
-            ) from exc
-        pipe.set_adapters([adapter_name], adapter_weights=[lora_scale])
-        with torch.inference_mode():
-            result = (
-                pipe(
-                    prompt=prompt,
-                    image=annotated,
-                    height=wh,
-                    width=ww,
-                    num_inference_steps=config.num_inference_steps,
-                    guidance_scale=config.guidance_scale,
-                    generator=torch.Generator(device="cpu").manual_seed(
-                        get_random_seed() if seed is None else seed
-                    ),
-                )
-                .images[0]
-                .convert("RGB")
-            )
-    finally:
-        list_adapters = getattr(pipe, "get_list_adapters", None)
-        installed = list_adapters() if callable(list_adapters) else {}
-        if any(adapter_name in names for names in installed.values()):
-            pipe.delete_adapters(adapter_name)
+    else:
+        klein_image = [work_image, work_mask.convert("RGB")]
+    embeds = load_remove_prompt_embeds(spec) if prompt is None else None
+    checkpoint = validated_object_remove_lora_path(
+        repo, weight_name, validate_comfy_keys=spec.validate_comfy_keys
+    )
+    result = generate_klein(
+        pool.flux2_klein_pipeline,
+        klein_image,
+        None if embeds is not None else instruction,
+        pool.config.klein,
+        prompt_embeds=embeds,
+        adapter_name=spec.adapter_name,
+        adapter_weight=adapter_weight,
+        pretrained=str(checkpoint.parent),
+        weight_name=checkpoint.name,
+        seed=seed,
+        height=wh,
+        width=ww,
+    )
     if result.size != (cw, ch):
         result = result.resize((cw, ch), Image.Resampling.LANCZOS)
 

@@ -16,6 +16,11 @@ harmonization, harmonized crop).
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path as _P
+
+sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+
 import argparse
 import os
 import time
@@ -34,8 +39,7 @@ from framework.inference.flux2_klein import (
 )
 from framework.inference.flux2_klein.placement import describe_anchor
 from framework.inference.flux2_klein.utils import NothingAdded
-
-from .test_edit_object import (
+from scripts.test_edit_object import (
     find_region,
     latest_annotation_file,
     load_record,

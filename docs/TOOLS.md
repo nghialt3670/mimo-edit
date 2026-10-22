@@ -315,8 +315,8 @@ tools = image_editing_tools(
 )
 ```
 
-`KleinInferenceConfig` controls `num_inference_steps`, `guidance_scale`, and
-`mask_context_padding`.
+`KleinInferenceConfig` controls `num_inference_steps`, `guidance_scale`,
+`mask_context_padding`, and `remove_lora` (`fal` or `slopshop`).
 `GroundingDinoInferenceConfig` controls the box and text confidence thresholds.
 `Sam3InferenceConfig` controls `mask_threshold`. `ObjectClearInferenceConfig`
 controls `num_inference_steps`,

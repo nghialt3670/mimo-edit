@@ -8,6 +8,14 @@ from framework.inference.config import KleinInferenceConfig
 from framework.inference.flux2_klein import flux2_klein_edit_object
 
 
+def _pixel_diff(before, after):
+    import numpy as np
+
+    changed = np.abs(np.asarray(before, int) - np.asarray(after, int)).sum(-1) > 0
+    weight = changed.astype(np.float32)
+    return weight, weight
+
+
 class EditRegionTests(unittest.TestCase):
     def setUp(self):
         self.image = Image.new("RGB", (240, 240), (100, 100, 100))
@@ -22,7 +30,7 @@ class EditRegionTests(unittest.TestCase):
     def _edit(self, paint, **kwargs):
         crops = []
 
-        def fake(_pipeline, crop, _prompt, _config):
+        def fake(_pipeline, crop, _prompt, _config, **_kwargs):
             crops.append(crop.size)
             return paint(crop)
 
@@ -39,6 +47,10 @@ class EditRegionTests(unittest.TestCase):
                 "framework.inference.flux2_klein.utils.vitmatte_alpha",
                 side_effect=lambda _pool, _img, m: m.astype(float),
             ),
+            patch(
+                "framework.inference.flux2_klein.utils.semantic_diff_weight",
+                side_effect=_pixel_diff,
+            ),
         ):
             result = flux2_klein_edit_object(
                 self.pool,
@@ -49,21 +61,12 @@ class EditRegionTests(unittest.TestCase):
             )
         return result, crops
 
-    def test_paste_weight_is_the_matte(self):
+    def test_paste_weight_follows_the_semantic_diff(self):
         result, _ = self._edit(
             lambda crop: Image.new("RGB", crop.size, (30, 30, 200)), mode="local"
         )
         self.assertEqual(result.getpixel((120, 120)), (30, 30, 200))
         self.assertEqual(result.getpixel((200, 120)), (100, 100, 100))
-
-    def test_pixels_outside_matte_are_untouched(self):
-        def paint(crop):
-            out = Image.new("RGB", crop.size, (255, 0, 0))
-            return out
-
-        result, _ = self._edit(paint, mode="regional", padding=0.5)
-        self.assertEqual(result.getpixel((150, 120)), (100, 100, 100))
-        self.assertEqual(result.getpixel((120, 120)), (255, 0, 0))
 
     def test_global_returns_full_klein_output(self):
         result, crops = self._edit(

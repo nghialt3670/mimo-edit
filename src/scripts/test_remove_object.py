@@ -11,6 +11,11 @@ runs Klein inpaint removal, and saves a side-by-side comparison.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path as _P
+
+sys.path.insert(0, str(_P(__file__).resolve().parents[1]))
+
 import argparse
 import json
 import os
@@ -22,8 +27,7 @@ from PIL import Image, ImageDraw
 
 from framework.inference import InferenceConfig, ModelPool
 from framework.inference.flux2_klein import flux2_klein_remove_object
-
-from .test_edit_object import latest_annotation_file
+from scripts.test_edit_object import latest_annotation_file
 
 DATASET_ID = "ziqiangoodgood/MIRAGE"
 
@@ -91,6 +95,12 @@ def main() -> None:
     parser.add_argument("--context-padding", type=float, default=1.5)
     parser.add_argument("--feather-px", type=int, default=24)
     parser.add_argument("--steps", type=int, default=None, help="Override Klein steps")
+    parser.add_argument(
+        "--lora",
+        choices=("fal", "slopshop"),
+        default=None,
+        help="Removal LoRA; default is KleinInferenceConfig.remove_lora",
+    )
     args = parser.parse_args()
 
     annotation_file = args.annotation_file or latest_annotation_file()
@@ -119,6 +129,7 @@ def main() -> None:
         mask_padding_ratio=args.mask_padding_ratio,
         context_padding=args.context_padding,
         feather_px=args.feather_px,
+        lora=args.lora,
     )
     print(f"removal took {time.time() - start:.1f}s")
 

@@ -44,6 +44,10 @@ class HarmonizeByAlphaTests(unittest.TestCase):
                 return_value=matte,
             ),
             patch("framework.inference.flux2_klein.utils.harmonize_with_mask", spy),
+            patch(
+                "framework.inference.flux2_klein.utils.semantic_diff_weight",
+                return_value=(matte, matte),
+            ),
         ):
             result, _ = blend_edit(pool, scene, crop_box, after, matte > 0.5)
             plain, _ = blend_edit(

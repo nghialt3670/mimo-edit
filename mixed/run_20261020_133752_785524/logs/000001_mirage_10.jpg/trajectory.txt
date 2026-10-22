@@ -1,0 +1,32 @@
+Observation:
+{
+  "type": "user_message",
+  "text": "Change the color of <box_0> to green, and change the material of <box_1> to stone, and add a small dog onto <box_2>, and remove <box_3>, and add a yellow sticker onto <box_4>.",
+  "objects": [
+    "image_0",
+    "box_0",
+    "box_1",
+    "box_2",
+    "box_3",
+    "box_4"
+  ]
+}
+
+Thought:
+Segment existing objects for color/material changes and removal, and add new objects to the specified destination boxes.
+
+Act:
+mask_0 = segment_object(image_0, box=box_0)
+image_1 = edit_object(image_0, mask=mask_0, prompt="Change the color of the object to green, keeping the texture, material and lighting.", mode="local", padding=0.25)
+
+mask_1 = segment_object(image_1, box=box_1)
+image_2 = edit_object(image_1, mask=mask_1, prompt="Change the material of the object to stone, keeping its shape and lighting.", mode="local", padding=0.25)
+
+image_3 = add_object(image_2, prompt="a small dog", anchor="on the surface", box=box_2)
+
+mask_3 = segment_object(image_3, box=box_3)
+image_4 = remove_object(image_3, mask=mask_3)
+
+image_5 = add_object(image_4, prompt="a yellow sticker", anchor="on the surface", box=box_4)
+
+send_message(text="I have applied all requested edits to the image.", objects=[image_5])

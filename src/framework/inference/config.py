@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 
 from .utils import (
     validate_non_negative_number,
     validate_number_range,
     validate_positive_integer,
 )
+
+KleinRemoveLora = Literal["fal", "slopshop"]
+KLEIN_REMOVE_LORAS = ("fal", "slopshop")
 
 
 @dataclass(frozen=True)
@@ -16,6 +20,9 @@ class KleinInferenceConfig:
     num_inference_steps: int = 4
     guidance_scale: float = 1.0
     mask_context_padding: int = 64
+    # ``fal``: magenta-highlight object-remove LoRA. ``slopshop``: erase-v1
+    # with the original photo plus an RGB mask as the second reference image.
+    remove_lora: KleinRemoveLora = "fal"
 
     def __post_init__(self) -> None:
         validate_positive_integer("klein.num_inference_steps", self.num_inference_steps)
@@ -23,6 +30,10 @@ class KleinInferenceConfig:
         validate_positive_integer(
             "klein.mask_context_padding", self.mask_context_padding
         )
+        if self.remove_lora not in KLEIN_REMOVE_LORAS:
+            raise ValueError(
+                "klein.remove_lora must be one of: " + ", ".join(KLEIN_REMOVE_LORAS)
+            )
 
 
 @dataclass(frozen=True)

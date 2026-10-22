@@ -1,17 +1,21 @@
-"""Helpers shared by the FLUX.2 Klein editing, insertion, and removal functions."""
+"""Helpers shared by FLUX.2 Klein editing, insertion, and removal functions."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
 import numpy as np
-import torch
 from PIL import Image
-
-from framework.utils.randomness import get_random_seed
 
 from ..config import KleinInferenceConfig
 from ..vitmatte import vitmatte_alpha
+from .lora import (
+    CONSISTENCY_ADAPTER_NAME,
+    CONSISTENCY_LORA_FILE,
+    CONSISTENCY_LORA_REPO,
+    generate_klein,
+)
+from .semantic_diff import semantic_diff_weight
 
 if TYPE_CHECKING:
     from diffusers import Flux2KleinPipeline
@@ -29,21 +33,29 @@ def generate_klein_edit(
     prompt: str,
     config: KleinInferenceConfig,
     seed_offset: int = 0,
+    *,
+    lora_strength: float = 0.0,
 ) -> Image.Image:
-    with torch.inference_mode():
-        return (
-            pipeline(
-                image=image,
-                prompt=prompt,
-                num_inference_steps=config.num_inference_steps,
-                guidance_scale=config.guidance_scale,
-                generator=torch.Generator(device="cpu").manual_seed(
-                    get_random_seed() + seed_offset
-                ),
-            )
-            .images[0]
-            .convert("RGB")
-        )
+    """Generate an image, optionally enabling the edit-consistency LoRA.
+
+    The adapter stays loaded on the shared pipeline. This call activates it
+    for inference, then disables LoRA so insert/remove see the base model
+    (or their own adapter) rather than a leftover consistency scale.
+    """
+    if not 0 <= lora_strength <= 1:
+        raise ValueError("lora_strength must be between 0 and 1")
+
+    return generate_klein(
+        pipeline,
+        image,
+        prompt,
+        config,
+        adapter_name=CONSISTENCY_ADAPTER_NAME if lora_strength > 0 else None,
+        adapter_weight=lora_strength,
+        pretrained=CONSISTENCY_LORA_REPO,
+        weight_name=CONSISTENCY_LORA_FILE,
+        seed_offset=seed_offset,
+    )
 
 
 # Shared settings for distilled FLUX.2 Klein 4B.
@@ -110,14 +122,7 @@ def segment_added_object(
     min_area: float = 0.01,
     debug: dict | None = None,
 ) -> np.ndarray:
-    """Mask of the object Klein added (bool, crop coordinates), never the whole box.
-
-    ``region`` is where the object was requested; the object may extend past it,
-    but its centre has to fall inside. Candidates come from SAM3 text masks of
-    ``prompt`` on ``after``, kept only if they are mostly new content (differ
-    from ``before``). Without a usable candidate the mask is the cleaned map of
-    changed pixels instead. If almost nothing changed, ``NothingAdded`` is raised.
-    """
+    """Mask of the added object, estimated from SAM3 or significant differences."""
     from scipy.ndimage import binary_dilation
 
     changed = _changed_map(before, after, change_threshold)
@@ -153,11 +158,7 @@ def segment_added_object(
 
 
 def harmonize_by_alpha(predictor, image: Image.Image, alpha: np.ndarray) -> Image.Image:
-    """Harmonize with strength proportional to ``alpha`` (weak at the edge, full inside).
-
-    PCT-Net only takes a binary mask, so it runs on every pixel where alpha is
-    not black, and its result is mixed with the input by alpha per pixel.
-    """
+    """Harmonize with strength proportional to alpha; zero alpha stays untouched."""
     support = Image.fromarray((alpha > 0).astype(np.uint8) * 255, "L")
     harmonized = np.asarray(
         harmonize_with_mask(predictor, image, support), dtype=np.float32

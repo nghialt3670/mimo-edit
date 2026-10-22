@@ -1,0 +1,49 @@
+{
+  "input_shape": [
+    201,
+    629
+  ],
+  "model_shape": [
+    201,
+    629
+  ],
+  "mode": "automatic",
+  "attempts": [
+    {
+      "threshold": 145.0,
+      "proposals": {
+        "t1": 30,
+        "t2": 33
+      },
+      "accepted_masks": 0,
+      "rejected_by_min_area": 0,
+      "covered_percent": 0.0
+    },
+    {
+      "threshold": 155.0,
+      "proposals": {
+        "t1": 30,
+        "t2": 33
+      },
+      "accepted_masks": 0,
+      "rejected_by_min_area": 0,
+      "covered_percent": 0.0
+    },
+    {
+      "threshold": 165.0,
+      "proposals": {
+        "t1": 30,
+        "t2": 33
+      },
+      "accepted_masks": 1,
+      "rejected_by_min_area": 0,
+      "covered_percent": 0.0886
+    }
+  ],
+  "selected_source": "AnyChange semantic",
+  "semantic_coverage_percent": 0.0886,
+  "fallback_rgb_coverage_percent": 11.026,
+  "selected_coverage_percent": 0.0886,
+  "final_weight_coverage_percent": 0.783,
+  "note": "RGB fallback is a heuristic, not equivalent to AnyChange."
+}
