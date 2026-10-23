@@ -42,8 +42,11 @@ def save_reference_assets(
         crop.save(crop_path)
         ref.region.crop_path = os.path.relpath(crop_path, output_jsonl.parent)
 
-        if ref.region.source.startswith("benchmark_mask") and sample.mask is not None:
+        reference_mask = sample.reference_masks.get(ref.entity_id)
+        if reference_mask is None and sample.mask is not None:
+            if ref.region.source.startswith(("benchmark_mask", "sam3")):
+                reference_mask = sample.mask
+        if reference_mask is not None:
             mask_path = root / f"{ref.entity_id}_mask.png"
-            reference_mask = sample.reference_masks.get(ref.entity_id, sample.mask)
             resize_mask(reference_mask, source.size).save(mask_path)
             ref.region.mask_path = os.path.relpath(mask_path, output_jsonl.parent)

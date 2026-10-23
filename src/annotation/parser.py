@@ -8,7 +8,7 @@ from PIL import Image
 
 from framework.utils.randomness import seed_random_generators
 
-from .schema import MaskClauseAssignments, ParsedInstruction
+from .schema import MaskClauseAssignments, ParsedInstruction, RefinementDecision
 
 SYSTEM_PROMPT = """You are a strict semantic parser for image-editing benchmark annotation.
 Return only the structured schema requested by the API.
@@ -71,6 +71,33 @@ For each region return:
 - grounding_query: a short description of the visible object.
 Return one assignment per region.
 """
+
+REFINEMENT_PROMPT = """You are reviewing a RefEdit-Bench mixed annotation.
+
+The magenta overlay is the dataset-provided mask that became visual reference <v1>.
+The mixed instruction replaced a span from the original instruction with that token.
+
+Decide whether the annotation should be optimized by re-masking a SMALLER, more specific visible entity that is the actual object of the edit (a part, accessory, garment, or held object), instead of a larger host (person, animal, vehicle) that the dataset mask covers.
+
+Optimize when:
+- The instruction edits or removes a part/accessory (sunglasses, hat, shirt, frisbee, headlights, ...) but the magenta mask covers the host (the man, the car, ...).
+- The mixed instruction is redundant: it still names the edited object in words and uses <v1> only as a host, e.g. "Remove the sunglasses from <v1>."
+
+Do not optimize when:
+- The mask already covers the edited entity.
+- The mixed instruction already uses <v1> as the edit target, e.g. "Remove <v1>." or "Change <v1> to red."
+- The edit is not a segmentable object (global lighting, the whole scene).
+- You cannot name a unique visible object that SAM 3 could segment from a short text phrase.
+
+If optimize=true:
+- span: exact verbatim phrase from the ORIGINAL instruction for the edited object AND any host/identifier used only to find it (for example "from the man ..."). Do not invent words. The mixed instruction should not keep that identifier, because the visual prompt already points at the object: "Remove the sunglasses from the man standing on the road wearing glasses." -> span "the sunglasses from the man standing on the road wearing glasses" -> mixed "Remove <v1>."
+- Keep requested-change wording outside the span: "Change the color of the shirt of the man to red." -> span "the shirt of the man" -> mixed "Change the color of <v1> to red."
+- sam3_text: a short SAM 3 text prompt for the visible edited object only (e.g. "sunglasses"), not the host.
+- role: "target" when that entity is being edited or removed; "anchor" only if a still-smaller part is edited.
+- grounding_query: short visual description of that entity.
+If optimize=false, leave span, sam3_text, and grounding_query empty.
+"""
+
 
 _MASK_PALETTE = (
     (230, 25, 75),
@@ -216,6 +243,52 @@ class GoogleParser:
             if response.parsed is not None:
                 return ParsedInstruction.model_validate(response.parsed)
             return ParsedInstruction.model_validate_json(response.text)
+
+        return self._with_retries(call)
+
+    def propose_refinement(
+        self,
+        *,
+        original_instruction: str,
+        mixed_instruction: str,
+        span: str,
+        role: str,
+        grounding_query: str,
+        image: Image.Image,
+        mask: Image.Image,
+    ) -> RefinementDecision:
+        """Ask whether the dataset mask should be replaced by a tighter SAM 3 mask."""
+        from io import BytesIO
+
+        from google.genai import types
+
+        image_buffer = BytesIO()
+        _mask_overlay(image, mask).save(image_buffer, format="PNG")
+        contents = [
+            (
+                f"Original instruction:\n{original_instruction}\n\n"
+                f"Mixed instruction:\n{mixed_instruction}\n\n"
+                f"Current visual reference: span={span!r}, role={role}, "
+                f"grounding_query={grounding_query!r}"
+            ),
+            types.Part.from_bytes(data=image_buffer.getvalue(), mime_type="image/png"),
+        ]
+
+        def call() -> RefinementDecision:
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=SYSTEM_PROMPT + "\n" + REFINEMENT_PROMPT,
+                    temperature=0,
+                    seed=self.seed,
+                    response_mime_type="application/json",
+                    response_schema=RefinementDecision,
+                ),
+            )
+            if response.parsed is not None:
+                return RefinementDecision.model_validate(response.parsed)
+            return RefinementDecision.model_validate_json(response.text)
 
         return self._with_retries(call)
 

@@ -8,12 +8,14 @@ from .core import (
 )
 from .grounder import GroundingDinoGrounder, HybridGrounder, MaskOnlyGrounder
 from .parser import GoogleParser
+from .refine import apply_refinement, refine_annotations, refined_output_path
 from .runner import convert_rows
 from .schema import (
     AnnotationRecord,
     ParsedEntity,
     ParsedInstruction,
     Reference,
+    RefinementDecision,
     Region,
     Sample,
 )
@@ -37,7 +39,11 @@ __all__ = [
     "NoReferenceError",
     "ParsedEntity",
     "ParsedInstruction",
+    "RefinementDecision",
     "Reference",
+    "apply_refinement",
+    "refine_annotations",
+    "refined_output_path",
     "Region",
     "Sample",
     "compbench",

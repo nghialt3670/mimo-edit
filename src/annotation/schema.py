@@ -30,6 +30,29 @@ class ParsedInstruction(BaseModel):
     )
 
 
+class RefinementDecision(BaseModel):
+    """Whether a RefEdit mixed annotation should be re-masked with SAM 3."""
+
+    optimize: bool = Field(
+        description=(
+            "True when the dataset mask covers a host object instead of the "
+            "actual edited part or accessory."
+        )
+    )
+    reason: str = Field(description="Short justification for the decision.")
+    span: str = Field(
+        default="",
+        description="Verbatim phrase from the original instruction for the new mask.",
+    )
+    occurrence: int = Field(default=0, ge=0)
+    role: Role = "target"
+    grounding_query: str = Field(default="")
+    sam3_text: str = Field(
+        default="",
+        description="Short SAM 3 text prompt for the entity the new mask should cover.",
+    )
+
+
 class MaskClauseAssignment(BaseModel):
     mask_index: int = Field(description="1-based number of the highlighted region.")
     clause_index: int = Field(description="1-based number of the matching clause.")
