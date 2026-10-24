@@ -381,6 +381,31 @@ class Agent:
             code = parse_code_blobs(raw, tags)
         return FirstTurnCommand(code=code.strip(), thought=thought, raw_output=raw)
 
+    def first_turn_messages(
+        self, text: str, *, objects: dict[str, Any] | None = None
+    ) -> list[ChatMessage]:
+        """Return the model messages for the first turn without calling the model."""
+        self._begin_turn(text, objects)
+        messages = self._agent.write_memory_to_messages()
+        messages.append(
+            ChatMessage(
+                role=MessageRole.USER,
+                content=[{"type": "text", "text": FIRST_TURN_INSTRUCTION}],
+            )
+        )
+        return messages
+
+    def first_turn_request_options(self) -> dict[str, Any]:
+        """Return the ``generate`` keyword arguments for first-turn requests."""
+        options: dict[str, Any] = {"stop_sequences": ["Observation:", "Calling tools:"]}
+        if self.structured_thought:
+            options["response_format"] = CODEAGENT_RESPONSE_FORMAT
+        return options
+
+    def parse_first_turn_output(self, raw: str) -> FirstTurnCommand:
+        """Parse one raw model output into a first-turn command."""
+        return self._parse_first_turn_output(raw)
+
     def generate_first_turn(
         self,
         text: str,
@@ -393,21 +418,8 @@ class Agent:
         The model is re-prompted with the rejection reason when the output cannot be
         parsed or does not end with ``send_message``.
         """
-        self._begin_turn(text, objects)
-        inner = self._agent
-        messages = inner.write_memory_to_messages()
-        messages.append(
-            ChatMessage(
-                role=MessageRole.USER,
-                content=[{"type": "text", "text": FIRST_TURN_INSTRUCTION}],
-            )
-        )
-        additional_args = (
-            {"response_format": CODEAGENT_RESPONSE_FORMAT}
-            if self.structured_thought
-            else {}
-        )
-        stop_sequences = ["Observation:", "Calling tools:"]
+        messages = self.first_turn_messages(text, objects=objects)
+        request_options = self.first_turn_request_options()
         last_raw = ""
         problem = ""
         for _ in range(max_attempts):
@@ -429,9 +441,7 @@ class Agent:
                         ],
                     )
                 )
-            chat = self.model.generate(
-                messages, stop_sequences=stop_sequences, **additional_args
-            )
+            chat = self.model.generate(messages, **request_options)
             last_raw = chat.content or ""
             try:
                 command = self._parse_first_turn_output(last_raw)

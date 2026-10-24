@@ -240,8 +240,8 @@ def resolve_run_directory(
     return run_dir
 
 
-def create_agent_model() -> Any:
-    """Create the shared OpenAI-compatible model configured for inference."""
+def create_agent_model(model_id: str | None = None) -> Any:
+    """Create the shared OpenAI-compatible model; defaults to MMEDIT_MODEL_ID."""
     load_project_environment()
     seed_random_generators()
     api_key = os.environ.get("MMEDIT_API_KEY") or os.environ.get("GOOGLE_API_KEY")
@@ -251,7 +251,7 @@ def create_agent_model() -> Any:
     from smolagents import OpenAIModel
 
     return OpenAIModel(
-        model_id=os.environ.get("MMEDIT_MODEL_ID") or "gemini-2.5-flash",
+        model_id=model_id or os.environ.get("MMEDIT_MODEL_ID") or "gemini-2.5-flash",
         api_base=os.environ.get("MMEDIT_OPENAI_BASE_URL")
         or "https://generativelanguage.googleapis.com/v1beta/openai/",
         api_key=api_key,
