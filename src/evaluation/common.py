@@ -19,7 +19,12 @@ from tqdm.auto import tqdm
 
 from framework.utils.randomness import seed_random_generators
 
-from .first_turn import FirstTurnConfig, FirstTurnEntry, task_fingerprint
+from .first_turn import (
+    FirstTurnConfig,
+    FirstTurnEntry,
+    prompt_signature,
+    task_fingerprint,
+)
 from .spatial import needs_spatial_anchor_box
 
 if TYPE_CHECKING:
@@ -577,6 +582,7 @@ def _load_or_generate_first_turn(
     *,
     sample_id: str,
     prompt_mode: str,
+    prompt_signature: str,
     task: str,
     objects: dict[str, Any],
     model: Any,
@@ -584,13 +590,13 @@ def _load_or_generate_first_turn(
 ) -> FirstTurnCommand:
     """Return the saved first-turn command, or generate and save a new one.
 
-    In replay mode a missing or stale entry (fingerprint mismatch) is regenerated.
+    Entries are keyed by prompt signature, so each prompt-type combination has its own command.
     """
     from framework.core.agent import FirstTurnCommand
 
     fingerprint = task_fingerprint(task, objects)
     if first_turn.mode == "replay":
-        cached = first_turn.store.get(sample_id, prompt_mode)
+        cached = first_turn.store.get(sample_id, prompt_mode, prompt_signature)
         if cached is not None and cached.fingerprint == fingerprint:
             entry["first_turn_source"] = "cache"
             return FirstTurnCommand(
@@ -599,12 +605,17 @@ def _load_or_generate_first_turn(
                 raw_output=cached.raw_output,
             )
         if cached is not None:
-            tqdm.write(f"First-turn cache is stale for {sample_id}; regenerating.")
+            tqdm.write(
+                f"First-turn cache is stale for {sample_id}; regenerating.\n"
+                f"  cached:  {cached.task!r} objects={cached.objects}\n"
+                f"  current: {task!r} objects={sorted(objects)}"
+            )
     command = agent.generate_first_turn(task, objects=objects)
     first_turn.store.put(
         FirstTurnEntry(
             sample_id=sample_id,
             prompt_mode=prompt_mode,
+            prompt_signature=prompt_signature,
             fingerprint=fingerprint,
             task=task,
             objects=sorted(objects),
@@ -714,13 +725,18 @@ def run_one(
                     first_turn,
                     sample_id=str(sample_id),
                     prompt_mode=prompt_mode,
+                    prompt_signature=prompt_signature(
+                        ref["selected_prompt"]["type"]
+                        for ref in sample["references"]
+                        if ref.get("selected_prompt") is not None
+                    ),
                     task=task,
                     objects=objects,
                     model=model,
                     entry=entry,
                 )
                 if first_turn.mode == "replay":
-                    result = agent.replay_first_turn(command, task, objects)
+                    result = agent.replay_first_turn(command, task, objects=objects)
         finally:
             entry["agent_elapsed_seconds"] = round(
                 time.perf_counter() - agent_started_at, 2

@@ -10,11 +10,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Literal
 
 FIRST_TURN_FILE_NAME = "first_turn.jsonl"
+_PROMPT_TOKEN = re.compile(r"<(box|point|scribble)_\d+>")
 
 
 def task_fingerprint(task: str, objects: dict[str, Any]) -> str:
@@ -27,10 +30,21 @@ def task_fingerprint(task: str, objects: dict[str, Any]) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def prompt_signature(prompt_types: Iterable[str]) -> str:
+    """Join selected visual prompt types in reference order, e.g. 'box,point'."""
+    return ",".join(prompt_types)
+
+
+def prompt_signature_from_task(task: str) -> str:
+    """Recover the prompt signature from the prompt tokens in a task string."""
+    return prompt_signature(_PROMPT_TOKEN.findall(task))
+
+
 @dataclass(frozen=True, slots=True)
 class FirstTurnEntry:
     sample_id: str
     prompt_mode: str
+    prompt_signature: str
     fingerprint: str
     task: str
     objects: list[str]
@@ -41,26 +55,38 @@ class FirstTurnEntry:
 
 
 class FirstTurnStore:
-    """Append-only JSONL store keyed by sample id and prompt mode. The last entry wins."""
+    """Append-only JSONL store keyed by sample id, prompt mode, and prompt signature.
+
+    The last entry wins. Lines without a prompt_signature (legacy) are ignored.
+    """
 
     def __init__(self, path: Path) -> None:
         self.path = path
-        self._entries: dict[tuple[str, str], FirstTurnEntry] = {}
+        self._entries: dict[tuple[str, str, str], FirstTurnEntry] = {}
         if path.is_file():
             for line in path.read_text(encoding="utf-8").splitlines():
                 if not line.strip():
                     continue
-                entry = FirstTurnEntry(**json.loads(line))
-                self._entries[(entry.sample_id, entry.prompt_mode)] = entry
+                record = json.loads(line)
+                if "prompt_signature" not in record:
+                    continue
+                entry = FirstTurnEntry(**record)
+                self._entries[self._key(entry)] = entry
 
-    def get(self, sample_id: str, prompt_mode: str) -> FirstTurnEntry | None:
-        return self._entries.get((sample_id, prompt_mode))
+    @staticmethod
+    def _key(entry: FirstTurnEntry) -> tuple[str, str, str]:
+        return (entry.sample_id, entry.prompt_mode, entry.prompt_signature)
+
+    def get(
+        self, sample_id: str, prompt_mode: str, signature: str
+    ) -> FirstTurnEntry | None:
+        return self._entries.get((sample_id, prompt_mode, signature))
 
     def put(self, entry: FirstTurnEntry) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as stream:
             stream.write(json.dumps(asdict(entry), ensure_ascii=False) + "\n")
-        self._entries[(entry.sample_id, entry.prompt_mode)] = entry
+        self._entries[self._key(entry)] = entry
 
 
 @dataclass(frozen=True, slots=True)

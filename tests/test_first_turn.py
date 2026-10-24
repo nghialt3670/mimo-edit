@@ -87,6 +87,7 @@ class FirstTurnTests(unittest.TestCase):
             entry = FirstTurnEntry(
                 sample_id="s1",
                 prompt_mode="mixed",
+                prompt_signature="box",
                 fingerprint=fingerprint,
                 task="task",
                 objects=["image_1"],
@@ -99,12 +100,62 @@ class FirstTurnTests(unittest.TestCase):
             store.put(entry)
             store.put(replace(entry, code="send_message(text='b', objects=[])"))
 
-            reloaded = FirstTurnStore(path).get("s1", "mixed")
+            reloaded = FirstTurnStore(path).get("s1", "mixed", "box")
 
             self.assertIsNotNone(reloaded)
             self.assertEqual(reloaded.code, "send_message(text='b', objects=[])")
             self.assertEqual(reloaded.fingerprint, fingerprint)
-            self.assertIsNone(FirstTurnStore(path).get("s1", "text"))
+            self.assertIsNone(FirstTurnStore(path).get("s1", "text", "box"))
+            self.assertIsNone(FirstTurnStore(path).get("s1", "mixed", "point"))
+
+    def test_store_keeps_one_entry_per_prompt_signature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "first_turn.jsonl"
+            base = FirstTurnEntry(
+                sample_id="s1",
+                prompt_mode="mixed",
+                prompt_signature="box",
+                fingerprint="f",
+                task="Remove <box_0>.",
+                objects=["box_0", "image_0"],
+                thought="t",
+                code="box code",
+                raw_output="raw",
+                model_id="fake",
+            )
+            store = FirstTurnStore(path)
+            store.put(base)
+            store.put(
+                replace(
+                    base,
+                    prompt_signature="point",
+                    task="Remove <point_0>.",
+                    code="point code",
+                )
+            )
+
+            reloaded = FirstTurnStore(path)
+
+            self.assertEqual(reloaded.get("s1", "mixed", "box").code, "box code")
+            self.assertEqual(reloaded.get("s1", "mixed", "point").code, "point code")
+
+    def test_store_ignores_legacy_lines_without_prompt_signature(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "first_turn.jsonl"
+            legacy = {
+                "sample_id": "s1",
+                "prompt_mode": "mixed",
+                "fingerprint": "f",
+                "task": "Remove <box_0>.",
+                "objects": ["box_0", "image_0"],
+                "thought": "t",
+                "code": "legacy",
+                "raw_output": "raw",
+                "model_id": None,
+            }
+            path.write_text(json.dumps(legacy) + "\n", encoding="utf-8")
+
+            self.assertIsNone(FirstTurnStore(path).get("s1", "mixed", "box"))
 
 
 if __name__ == "__main__":
