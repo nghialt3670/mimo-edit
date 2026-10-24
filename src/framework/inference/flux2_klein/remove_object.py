@@ -21,6 +21,36 @@ from .utils import WORK_SIZE, harmonize_with_mask
 
 REMOVE_PROMPT = REMOVE_LORAS["fal"].prompt
 HIGHLIGHT_COLOR = (255, 0, 255)
+EDGE_PAD = 128
+
+
+def _edge_pad(mask: Image.Image, limit: int) -> int:
+    """Return the reflection margin needed when the mask touches the crop border."""
+    array = np.asarray(mask) > 127
+    if not (array[0].any() or array[-1].any() or array[:, 0].any() or array[:, -1].any()):
+        return 0
+    return max(0, min(EDGE_PAD, limit - 1))
+
+
+def _reflect_pad(
+    image: Image.Image, mask: Image.Image, pad: int
+) -> tuple[Image.Image, Image.Image]:
+    """Pad image and mask by reflection so the edit has scene context on every side."""
+    if not pad:
+        return image, mask
+    rgb = cv2.copyMakeBorder(np.asarray(image), pad, pad, pad, pad, cv2.BORDER_REFLECT)
+    grey = cv2.copyMakeBorder(np.asarray(mask), pad, pad, pad, pad, cv2.BORDER_REFLECT)
+    return Image.fromarray(rgb, "RGB"), Image.fromarray(grey, "L")
+
+
+def _strip_highlight(result: Image.Image, fill: Image.Image, mask: Image.Image) -> Image.Image:
+    """Replace magenta that survived inside the mask with the classical fill."""
+    rgb = np.asarray(result.convert("RGB"))
+    distance = np.abs(rgb.astype(np.int16) - np.array(HIGHLIGHT_COLOR, np.int16)).sum(-1)
+    leak = (distance < 90) & (np.asarray(mask) > 127)
+    if leak.any():
+        rgb = np.where(leak[..., None], np.asarray(fill.convert("RGB")), rgb)
+    return Image.fromarray(rgb.astype(np.uint8), "RGB")
 
 
 def _poisson_blend(
@@ -194,15 +224,19 @@ def flux2_klein_remove_object(
 
     # --- Run the LoRA edit at a VAE-friendly size (multiple of 16) -----------
     cw, ch = crop.size
-    scale = min(1.0, WORK_SIZE / max(cw, ch))
-    ww = max(64, round(cw * scale / 16) * 16)
-    wh = max(64, round(ch * scale / 16) * 16)
-    work_image = crop.resize((ww, wh), Image.Resampling.LANCZOS)
-    work_mask = crop_mask.resize((ww, wh), Image.Resampling.NEAREST)
+    pad = _edge_pad(crop_mask, min(cw, ch))
+    padded_image, padded_mask = _reflect_pad(crop, crop_mask, pad)
+    pw, ph = padded_image.size
+    scale = min(1.0, WORK_SIZE / max(pw, ph))
+    ww = max(64, round(pw * scale / 16) * 16)
+    wh = max(64, round(ph * scale / 16) * 16)
+    work_image = padded_image.resize((ww, wh), Image.Resampling.LANCZOS)
+    work_mask = padded_mask.resize((ww, wh), Image.Resampling.NEAREST)
+    filled = _classical_fill(work_image, work_mask) if spec.highlight else work_image
 
     if spec.highlight:
         klein_image: Image.Image | list[Image.Image] = _highlight(
-            _classical_fill(work_image, work_mask), work_mask, highlight_opacity
+            filled, work_mask, highlight_opacity
         )
     else:
         klein_image = [work_image, work_mask.convert("RGB")]
@@ -224,8 +258,11 @@ def flux2_klein_remove_object(
         height=wh,
         width=ww,
     )
-    if result.size != (cw, ch):
-        result = result.resize((cw, ch), Image.Resampling.LANCZOS)
+    if spec.highlight:
+        result = _strip_highlight(result, filled, work_mask)
+    if result.size != (pw, ph):
+        result = result.resize((pw, ph), Image.Resampling.LANCZOS)
+    result = result.crop((pad, pad, pad + cw, pad + ch))
 
     # --- Composite back through a feathered mask -----------------------------
     if harmonize:

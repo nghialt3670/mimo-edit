@@ -1,9 +1,31 @@
 from __future__ import annotations
 
+import numpy as np
 from PIL import Image
 
 from .pool import ModelPool
 from .utils import validate_box, validate_number_range
+
+
+def _keep_prompt_components(
+    binary: np.ndarray, points: list[dict[str, int]] | None
+) -> np.ndarray:
+    from scipy import ndimage
+
+    labels, count = ndimage.label(binary)
+    if count == 0:
+        return binary
+    keep = set()
+    for point in points or []:
+        if point.get("label", 1) != 1:
+            continue
+        x, y = point["x"], point["y"]
+        if 0 <= y < binary.shape[0] and 0 <= x < binary.shape[1] and labels[y, x]:
+            keep.add(int(labels[y, x]))
+    if not keep:
+        sizes = ndimage.sum_labels(binary, labels, index=range(1, count + 1))
+        keep.add(int(np.argmax(sizes)) + 1)
+    return np.isin(labels, list(keep)).astype("uint8")
 
 
 def sam3_segment_mask(
@@ -37,6 +59,7 @@ def sam3_segment_mask(
         outputs.pred_masks, original_sizes=inputs["original_sizes"]
     )[0][0][best_index]
     binary = (mask.cpu().numpy() > pool.config.sam3.mask_threshold).astype("uint8")
+    binary = _keep_prompt_components(binary, points)
     return Image.fromarray(binary * 255, mode="L")
 
 
