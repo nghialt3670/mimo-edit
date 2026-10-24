@@ -1,15 +1,24 @@
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import time
 from collections.abc import Iterable
+from dataclasses import dataclass
 from inspect import Parameter, Signature
 from types import MethodType
 from typing import Any
 
 from smolagents import CodeAgent, Tool
-from smolagents.memory import ActionStep, TaskStep
+from smolagents.memory import ActionStep, SystemPromptStep, TaskStep, Timing, ToolCall
+from smolagents.models import CODEAGENT_RESPONSE_FORMAT, ChatMessage, MessageRole
+from smolagents.utils import (
+    AgentExecutionError,
+    extract_code_from_text,
+    parse_code_blobs,
+    truncate_content,
+)
 
 from framework.utils.randomness import seed_random_generators
 
@@ -17,6 +26,37 @@ from . import prompts as _prompts
 from .executor import TerminalExecutor, local_executor
 from .schema import Message, TurnResult
 from .trajectory import clean_trajectory, format_trajectory
+
+FIRST_TURN_INSTRUCTION = (
+    "This is the first turn. Write one complete code action that handles the whole task "
+    "and ends with a send_message(text=..., objects=[...]) call."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FirstTurnCommand:
+    """The first code action for a turn, generated without executing it."""
+
+    code: str
+    thought: str
+    raw_output: str
+
+
+def first_turn_violation(code: str) -> str | None:
+    """Return why ``code`` cannot end a turn, or None when it ends with send_message."""
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return f"the code does not parse ({exc})."
+    if tree.body and isinstance(tree.body[-1], ast.Expr):
+        call = tree.body[-1].value
+        if (
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "send_message"
+        ):
+            return None
+    return "the code must end with a send_message(...) call."
 
 
 def _prompt_text_characters(messages: list[Any]) -> int:
@@ -283,23 +323,15 @@ class Agent:
         agent._timing_records = self.timing_records
         return agent
 
-    def send(self, text: str, *, objects: dict[str, Any] | None = None) -> TurnResult:
-        """Append one user message and run until ``send_message`` terminates this turn."""
-
-        objects = dict(objects or {})
-        self._agent.state.update(objects)
-        observation = json.dumps(
+    @staticmethod
+    def _user_observation(text: str, objects: dict[str, Any]) -> str:
+        return json.dumps(
             {"type": "user_message", "text": text, "objects": list(objects)},
             ensure_ascii=False,
         )
-        raw = self._agent.run(
-            observation,
-            reset=not self._started,
-            return_full_result=True,
-        )
-        self._started = True
 
-        output = raw.output
+    @staticmethod
+    def _turn_result(output: Any, raw: Any) -> TurnResult:
         if isinstance(output, dict) and "text" in output:
             message = Message(
                 text=str(output["text"]), objects=list(output.get("objects") or [])
@@ -307,6 +339,157 @@ class Agent:
         else:
             message = Message(text=str(output), objects=[])
         return TurnResult(message=message, raw=raw)
+
+    def send(self, text: str, *, objects: dict[str, Any] | None = None) -> TurnResult:
+        """Append one user message and run until ``send_message`` terminates this turn."""
+
+        objects = dict(objects or {})
+        self._agent.state.update(objects)
+        raw = self._agent.run(
+            self._user_observation(text, objects),
+            reset=not self._started,
+            return_full_result=True,
+        )
+        self._started = True
+        return self._turn_result(raw.output, raw)
+
+    def _begin_turn(self, text: str, objects: dict[str, Any] | None) -> None:
+        """Reset memory to a single first user message, as ``run`` does for a new task."""
+        objects = dict(objects or {})
+        inner = self._agent
+        inner.state.update(objects)
+        observation = self._user_observation(text, objects)
+        inner.task = observation
+        inner.interrupt_switch = False  # normally set by smolagents' run()
+        inner.memory.system_prompt = SystemPromptStep(system_prompt=inner.system_prompt)
+        inner.memory.reset()
+        inner.monitor.reset()
+        inner.memory.steps.append(TaskStep(task=observation))
+        inner.python_executor.send_variables(variables=inner.state)
+        inner.python_executor.send_tools({**inner.tools, **inner.managed_agents})
+        self._started = True
+
+    def _parse_first_turn_output(self, raw: str) -> FirstTurnCommand:
+        tags = self._agent.code_block_tags
+        if self.structured_thought:
+            payload = json.loads(raw)
+            thought = str(payload.get("thought") or "").strip()
+            code = str(payload["code"])
+            code = extract_code_from_text(code, tags) or code
+        else:
+            thought = ""
+            code = parse_code_blobs(raw, tags)
+        return FirstTurnCommand(code=code.strip(), thought=thought, raw_output=raw)
+
+    def generate_first_turn(
+        self,
+        text: str,
+        *,
+        objects: dict[str, Any] | None = None,
+        max_attempts: int = 3,
+    ) -> FirstTurnCommand:
+        """Ask the model for one first-turn code action without executing it.
+
+        The model is re-prompted with the rejection reason when the output cannot be
+        parsed or does not end with ``send_message``.
+        """
+        self._begin_turn(text, objects)
+        inner = self._agent
+        messages = inner.write_memory_to_messages()
+        messages.append(
+            ChatMessage(
+                role=MessageRole.USER,
+                content=[{"type": "text", "text": FIRST_TURN_INSTRUCTION}],
+            )
+        )
+        additional_args = (
+            {"response_format": CODEAGENT_RESPONSE_FORMAT}
+            if self.structured_thought
+            else {}
+        )
+        stop_sequences = ["Observation:", "Calling tools:"]
+        last_raw = ""
+        problem = ""
+        for _ in range(max_attempts):
+            if problem:
+                messages.append(
+                    ChatMessage(
+                        role=MessageRole.ASSISTANT,
+                        content=[{"type": "text", "text": last_raw}],
+                    )
+                )
+                messages.append(
+                    ChatMessage(
+                        role=MessageRole.USER,
+                        content=[
+                            {
+                                "type": "text",
+                                "text": f"Rejected: {problem} Respond again with one complete first-turn code action.",
+                            }
+                        ],
+                    )
+                )
+            chat = self.model.generate(
+                messages, stop_sequences=stop_sequences, **additional_args
+            )
+            last_raw = chat.content or ""
+            try:
+                command = self._parse_first_turn_output(last_raw)
+            except Exception as exc:
+                problem = f"the output could not be parsed ({exc})."
+                continue
+            problem = first_turn_violation(command.code) or ""
+            if not problem:
+                return command
+        raise RuntimeError(f"First-turn generation failed: {problem}")
+
+    def replay_first_turn(
+        self,
+        command: FirstTurnCommand,
+        text: str,
+        *,
+        objects: dict[str, Any] | None = None,
+    ) -> TurnResult:
+        """Execute a saved first-turn action.
+
+        The ReAct loop continues with the model only when the execution raises an error
+        or does not finish the turn.
+        """
+        self._begin_turn(text, objects)
+        inner = self._agent
+        step = ActionStep(
+            step_number=1,
+            timing=Timing(start_time=time.time()),
+            model_output_message=ChatMessage(
+                role=MessageRole.ASSISTANT, content=command.raw_output
+            ),
+            model_output=command.raw_output,
+            code_action=command.code,
+            tool_calls=[
+                ToolCall(name="python_interpreter", arguments=command.code, id="call_1")
+            ],
+        )
+        inner.memory.steps.append(step)
+        code_output = None
+        try:
+            code_output = inner.python_executor(command.code)
+            step.observations = (
+                "Execution logs:\n"
+                + code_output.logs
+                + "Last output from code snippet:\n"
+                + truncate_content(str(code_output.output))
+            )
+            step.action_output = code_output.output
+            step.is_final_answer = code_output.is_final_answer
+        except Exception as exc:
+            step.error = AgentExecutionError(str(exc), inner.logger)
+        step.timing.end_time = time.time()
+        _ObservationFormatter()(step, agent=inner)
+
+        if step.error is None and step.is_final_answer:
+            return self._turn_result(code_output.output, raw=None)
+        steps = list(inner._run_stream(task=inner.task, max_steps=inner.max_steps))
+        return self._turn_result(steps[-1].output, raw=None)
 
     def reset(self) -> None:
         """Start a fresh conversation and fresh Python namespace."""

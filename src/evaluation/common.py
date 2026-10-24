@@ -11,7 +11,7 @@ import traceback
 from collections.abc import Iterable, Iterator
 from io import BytesIO
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import numpy as np
 from PIL import Image, ImageDraw
@@ -19,7 +19,11 @@ from tqdm.auto import tqdm
 
 from framework.utils.randomness import seed_random_generators
 
+from .first_turn import FirstTurnConfig, FirstTurnEntry, task_fingerprint
 from .spatial import needs_spatial_anchor_box
+
+if TYPE_CHECKING:
+    from framework.core.agent import FirstTurnCommand
 
 AGENT_EXECUTION_TIMEOUT_SECONDS = 300
 PromptMode = Literal["text", "mixed"]
@@ -567,6 +571,53 @@ def _write_raw_agent_trajectory(
     )
 
 
+def _load_or_generate_first_turn(
+    agent: Any,
+    first_turn: FirstTurnConfig,
+    *,
+    sample_id: str,
+    prompt_mode: str,
+    task: str,
+    objects: dict[str, Any],
+    model: Any,
+    entry: dict[str, Any],
+) -> FirstTurnCommand:
+    """Return the saved first-turn command, or generate and save a new one.
+
+    In replay mode a missing or stale entry (fingerprint mismatch) is regenerated.
+    """
+    from framework.core.agent import FirstTurnCommand
+
+    fingerprint = task_fingerprint(task, objects)
+    if first_turn.mode == "replay":
+        cached = first_turn.store.get(sample_id, prompt_mode)
+        if cached is not None and cached.fingerprint == fingerprint:
+            entry["first_turn_source"] = "cache"
+            return FirstTurnCommand(
+                code=cached.code,
+                thought=cached.thought,
+                raw_output=cached.raw_output,
+            )
+        if cached is not None:
+            tqdm.write(f"First-turn cache is stale for {sample_id}; regenerating.")
+    command = agent.generate_first_turn(task, objects=objects)
+    first_turn.store.put(
+        FirstTurnEntry(
+            sample_id=sample_id,
+            prompt_mode=prompt_mode,
+            fingerprint=fingerprint,
+            task=task,
+            objects=sorted(objects),
+            thought=command.thought,
+            code=command.code,
+            raw_output=command.raw_output,
+            model_id=getattr(model, "model_id", None),
+        )
+    )
+    entry["first_turn_source"] = "generated"
+    return command
+
+
 def run_one(
     record: dict[str, Any],
     annotation_index: int,
@@ -578,6 +629,7 @@ def run_one(
     model: Any,
     tools: list[Any],
     max_steps: int = 16,
+    first_turn: FirstTurnConfig | None = None,
 ) -> dict[str, Any]:
     _validate_prompt_mode(prompt_mode)
     from framework.core import Agent, local_executor
@@ -651,13 +703,38 @@ def run_one(
             executor=local_executor(timeout_seconds=AGENT_EXECUTION_TIMEOUT_SECONDS),
             verbosity_level=0,
         )
+        command = None
         agent_started_at = time.perf_counter()
         try:
-            result = agent.send(task, objects=objects)
+            if first_turn is None:
+                result = agent.send(task, objects=objects)
+            else:
+                command = _load_or_generate_first_turn(
+                    agent,
+                    first_turn,
+                    sample_id=str(sample_id),
+                    prompt_mode=prompt_mode,
+                    task=task,
+                    objects=objects,
+                    model=model,
+                    entry=entry,
+                )
+                if first_turn.mode == "replay":
+                    result = agent.replay_first_turn(command, task, objects)
         finally:
             entry["agent_elapsed_seconds"] = round(
                 time.perf_counter() - agent_started_at, 2
             )
+        if result is None:
+            # Generate mode: the first action is saved, not executed, so there is no output image.
+            entry.update(
+                {
+                    "status": "first_turn_generated",
+                    "first_turn_thought": command.thought,
+                    "first_turn_code": command.code,
+                }
+            )
+            return entry
         images = [obj for obj in result.message.objects if isinstance(obj, Image.Image)]
         if not images:
             raise RuntimeError(
@@ -832,6 +909,7 @@ def run_benchmark(
     resume: bool = False,
     rerun_completed: bool = False,
     display_fn: Any = None,
+    first_turn: FirstTurnConfig | None = None,
 ) -> list[dict[str, Any]]:
     _validate_prompt_mode(prompt_mode)
     if rerun_completed and not resume:
@@ -913,11 +991,16 @@ def run_benchmark(
                 )
             results_by_index[annotation_index] = previous_result
 
+    done_status = (
+        "first_turn_generated"
+        if first_turn is not None and first_turn.mode == "generate"
+        else "completed"
+    )
     pending_indices = [
         index
         for index in selected_indices
         if rerun_completed
-        or results_by_index.get(index, {}).get("status") != "completed"
+        or results_by_index.get(index, {}).get("status") != done_status
     ]
     total = len(pending_indices)
     failures = []
@@ -971,6 +1054,7 @@ def run_benchmark(
             image_loader=image_loader,
             model=model,
             tools=tools,
+            first_turn=first_turn,
         )
         results_by_index[annotation_index] = result
         persist_results()

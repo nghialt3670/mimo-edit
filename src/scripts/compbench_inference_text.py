@@ -70,6 +70,9 @@ def _parse_args() -> argparse.Namespace:
         action="store_true",
         help="Fail before model loading if PyTorch cannot access a CUDA GPU.",
     )
+    from evaluation.first_turn import add_first_turn_arguments
+
+    add_first_turn_arguments(parser)
     args = parser.parse_args()
 
     if args.limit is not None and args.limit < 1:
@@ -113,6 +116,7 @@ def main() -> None:
         )
 
     from evaluation.common import run_benchmark
+    from evaluation.first_turn import build_first_turn_config
     from evaluation.compbench_incomplete import read_sample_indices
     from evaluation.notebook import (
         create_agent_model,
@@ -173,6 +177,7 @@ def main() -> None:
     tools = image_editing_tools()
     print(f"CompBench agent ready: {model.model_id}")
 
+    first_turn = build_first_turn_config(args, run_dir)
     results = run_benchmark(
         context.records,
         sample_indices,
@@ -185,6 +190,7 @@ def main() -> None:
         resume=args.resume,
         rerun_completed=args.rerun_completed,
         display_fn=None,
+        first_turn=first_turn,
     )
 
     completed = sum(result["status"] == "completed" for result in results)
