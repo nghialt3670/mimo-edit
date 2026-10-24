@@ -3,11 +3,11 @@ from __future__ import annotations
 from smolagents import Tool
 
 from framework.inference import (
-    GroundingDinoInferenceConfig,
     InferenceConfig,
     KleinInferenceConfig,
     ModelPool,
     ObjectClearInferenceConfig,
+    QwenLocateInferenceConfig,
     Sam3InferenceConfig,
 )
 
@@ -34,9 +34,9 @@ __all__ = [
     "ToolContext",
     "ModelPool",
     "InferenceConfig",
-    "GroundingDinoInferenceConfig",
     "KleinInferenceConfig",
     "ObjectClearInferenceConfig",
+    "QwenLocateInferenceConfig",
     "Sam3InferenceConfig",
     "build_tools",
     "image_editing_tools",

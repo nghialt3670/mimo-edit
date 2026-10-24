@@ -2,11 +2,11 @@
 
 from .core import Agent, Message, RunResult, TurnResult, local_executor
 from .tools import (
-    GroundingDinoInferenceConfig,
     InferenceConfig,
     KleinInferenceConfig,
     ModelPool,
     ObjectClearInferenceConfig,
+    QwenLocateInferenceConfig,
     Sam3InferenceConfig,
     ToolContext,
     image_editing_tools,
@@ -17,9 +17,9 @@ __all__ = [
     "Message",
     "ModelPool",
     "InferenceConfig",
-    "GroundingDinoInferenceConfig",
     "KleinInferenceConfig",
     "ObjectClearInferenceConfig",
+    "QwenLocateInferenceConfig",
     "Sam3InferenceConfig",
     "ToolContext",
     "RunResult",

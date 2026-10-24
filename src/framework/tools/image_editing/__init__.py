@@ -5,12 +5,12 @@ from . import (
     apply_filter,
     edit_object,
     flip_object,
+    locate_region,
     move_object,
     remove_object,
     replace_object,
     rotate_object,
     scale_object,
     segment_object,
-    segment_region,
     shift_object,
 )

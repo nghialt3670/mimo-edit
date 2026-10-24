@@ -16,8 +16,6 @@ from .utils import get_device, torch_dtype
 if TYPE_CHECKING:
     from diffusers import Flux2KleinInpaintPipeline, Flux2KleinPipeline
     from transformers import (
-        GroundingDinoForObjectDetection,
-        GroundingDinoProcessor,
         Sam3Model,
         Sam3Processor,
         Sam3TrackerModel,
@@ -36,9 +34,9 @@ class Sam3Pipelines:
 
 
 @dataclass(frozen=True)
-class GroundingDinoPipelines:
-    model: GroundingDinoForObjectDetection
-    processor: GroundingDinoProcessor
+class QwenLocatePipelines:
+    model: Any
+    processor: Any
 
 
 class ModelPool:
@@ -53,14 +51,14 @@ class ModelPool:
         flux2_klein_inpaint_pipeline - masked Klein inpainting / object removal
         mice_pipeline                - MICE spatially constrained Klein editing
         sam3_pipelines               - text and point/box segmentation
-        grounding_dino_pipelines     - phrase grounding for segmentation
+        qwen_locate_pipelines        - region bounding-box location
         object_clear_pipeline        - independent ObjectClear object removal
         pctnet_pipeline              - optional color harmonization
     """
 
     FLUX2_KLEIN_MODEL_ID = "black-forest-labs/FLUX.2-klein-4B"
     SAM3_MODEL_ID = "facebook/sam3"
-    GROUNDING_DINO_MODEL_ID = "IDEA-Research/grounding-dino-tiny"
+    QWEN_LOCATE_MODEL_ID = "Qwen/Qwen3.5-2B"
     OBJECT_CLEAR_MODEL_ID = "jixin0101/ObjectClear"
     VITMATTE_MODEL_ID = "hustvl/vitmatte-base-composition-1k"
 
@@ -188,21 +186,18 @@ class ModelPool:
         )
 
     @cached_property
-    def grounding_dino_pipelines(self) -> GroundingDinoPipelines:
-        from transformers import (
-            AutoModelForZeroShotObjectDetection,
-            AutoProcessor,
-        )
+    def qwen_locate_pipelines(self) -> QwenLocatePipelines:
+        from transformers import AutoModelForImageTextToText, AutoProcessor
 
         dtype = torch_dtype(self.device)
-        return GroundingDinoPipelines(
-            model=AutoModelForZeroShotObjectDetection.from_pretrained(
-                self.GROUNDING_DINO_MODEL_ID,
+        return QwenLocatePipelines(
+            model=AutoModelForImageTextToText.from_pretrained(
+                self.QWEN_LOCATE_MODEL_ID,
                 torch_dtype=dtype,
             )
             .to(self.device)
             .eval(),
-            processor=AutoProcessor.from_pretrained(self.GROUNDING_DINO_MODEL_ID),
+            processor=AutoProcessor.from_pretrained(self.QWEN_LOCATE_MODEL_ID),
         )
 
     @cached_property

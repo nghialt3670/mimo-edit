@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from PIL import Image
 
-from framework.inference import grounding_dino_segment_region
+from framework.inference import qwen_locate_region
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -10,8 +10,8 @@ from ..utils import validate_image, validate_text
 
 
 @register_tool(
-    "segment_region",
-    "Find a region described in natural language and return a precise object mask.",
+    "locate_region",
+    "Locate a region described in natural language and return its pixel bounding box.",
     {
         "image": {
             "type": "image",
@@ -20,17 +20,17 @@ from ..utils import validate_image, validate_text
         "prompt": {
             "type": "string",
             "description": (
-                "Natural-language description of the object or region to segment."
+                "Natural-language description of the region to locate."
             ),
         },
     },
-    "image",
+    "array",
 )
-def segment_region(
+def locate_region(
     ctx: ToolContext,
     image: Image.Image,
     prompt: str,
-) -> Image.Image:
+) -> list[float]:
     validate_image("image", image)
     validate_text("prompt", prompt)
-    return grounding_dino_segment_region(ctx.model_pool, image, prompt)
+    return qwen_locate_region(ctx.model_pool, image, prompt)

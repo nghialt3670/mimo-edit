@@ -89,8 +89,8 @@ def segment_object(
         if not masks:
             raise ValueError(
                 f"No object matched the text description: {text!r}. Try a concise "
-                "visible-object description with segment_region, or select the "
-                "object with a point, box, or scribble using segment_object."
+                "visible-object description, or locate the region with locate_region "
+                "and pass its box, or select the object with a point or scribble."
             )
         return masks[0]
     if point is not None:

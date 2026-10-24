@@ -47,17 +47,13 @@ class Sam3InferenceConfig:
 
 
 @dataclass(frozen=True)
-class GroundingDinoInferenceConfig:
-    """Inference settings for the fixed Grounding DINO detector."""
+class QwenLocateInferenceConfig:
+    """Inference settings for the fixed Qwen3.5-2B region locator."""
 
-    box_threshold: float = 0.35
-    text_threshold: float = 0.25
+    max_new_tokens: int = 32
 
     def __post_init__(self) -> None:
-        validate_number_range("grounding_dino.box_threshold", self.box_threshold, 0, 1)
-        validate_number_range(
-            "grounding_dino.text_threshold", self.text_threshold, 0, 1
-        )
+        validate_positive_integer("qwen_locate.max_new_tokens", self.max_new_tokens)
 
 
 @dataclass(frozen=True)
@@ -100,8 +96,8 @@ class InferenceConfig:
 
     klein: KleinInferenceConfig = field(default_factory=KleinInferenceConfig)
     sam3: Sam3InferenceConfig = field(default_factory=Sam3InferenceConfig)
-    grounding_dino: GroundingDinoInferenceConfig = field(
-        default_factory=GroundingDinoInferenceConfig
+    qwen_locate: QwenLocateInferenceConfig = field(
+        default_factory=QwenLocateInferenceConfig
     )
     object_clear: ObjectClearInferenceConfig = field(
         default_factory=ObjectClearInferenceConfig
@@ -113,7 +109,7 @@ class InferenceConfig:
         for name, value, config_type in (
             ("klein", self.klein, KleinInferenceConfig),
             ("sam3", self.sam3, Sam3InferenceConfig),
-            ("grounding_dino", self.grounding_dino, GroundingDinoInferenceConfig),
+            ("qwen_locate", self.qwen_locate, QwenLocateInferenceConfig),
             ("object_clear", self.object_clear, ObjectClearInferenceConfig),
             ("vitmatte", self.vitmatte, ViTMatteInferenceConfig),
         ):

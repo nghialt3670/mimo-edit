@@ -8,7 +8,7 @@ This document describes the tools registered by
 | Tool | Purpose | Backbone |
 | --- | --- | --- |
 | [`segment_object`](../src/framework/tools/image_editing/segment_object.py) | Find one object and return its mask | SAM 3 |
-| [`segment_region`](../src/framework/tools/image_editing/segment_region.py) | Ground a text description and return its mask | Grounding DINO + SAM 3 |
+| [`locate_region`](../src/framework/tools/image_editing/locate_region.py) | Locate a text-described region and return its box | Qwen3.5-2B |
 | [`edit_object`](../src/framework/tools/image_editing/edit_object.py) | Semantically edit one masked object | FLUX.2 Klein base 4B |
 | [`remove_object`](../src/framework/tools/image_editing/remove_object.py) | Remove one masked object | ObjectClear |
 | [`replace_object`](../src/framework/tools/image_editing/replace_object.py) | Remove an object, then paste a replacement image | ObjectClear + Pillow |
@@ -38,12 +38,13 @@ inference settings are documented in
   as the next call's input.
 - `segment_object` creates masks. Other object-targeting tools consume a mask;
   they do not automatically identify the object from a text description.
-- `segment_region` grounds a natural-language description to a box with
-  Grounding DINO, then uses SAM 3 to return a pixel mask for that region.
+- `locate_region` locates a natural-language description and returns a pixel box
+  from Qwen3.5-2B. It always returns a box; if the model output cannot be parsed,
+  it returns the full image box.
 - Model-backed tools use one eagerly initialized `ModelPool`. Constructing it
   loads Klein, SAM 3, and ObjectClear together, so confirm that the host has
-  enough memory before creating the tool set. Grounding DINO loads only when
-  `segment_region` is first used. Reuse the pool across calls.
+  enough memory before creating the tool set. Qwen3.5-2B loads only when
+  `locate_region` is first used. Reuse the pool across calls.
 
 ## Tool interfaces and behavior
 
@@ -71,26 +72,27 @@ where the selected region is white.
 An empty/whitespace-only text prompt, missing selector, multiple selectors,
 malformed point, empty scribble, or a text prompt with no matching object raises
 an error. If text segmentation finds no match, retry with a concise visible-object
-description using `segment_region`, or select the object with a point, box, or
-scribble; do not repeat near-identical text prompts.
+description, or locate the region with `locate_region` and pass its box; do not repeat
+near-identical text prompts.
 
 **Backbone:** `facebook/sam3` by default. Both the text and visual-prompt
 pathways share the lazily loaded SAM 3 model bundle.
 
-### `segment_region`
+### `locate_region`
 
-**Backbone:** Grounding DINO (`IDEA-Research/grounding-dino-tiny`) for text
-grounding followed by SAM 3 for mask refinement.
+**Backbone:** Qwen3.5-2B (`Qwen/Qwen3.5-2B`), prompted to answer with JSON
+`bbox_2d` coordinates normalized to 0-1000.
 
 | Name | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `image` | Image | Yes | Source image. |
 | `prompt` | String | Yes | Natural-language description of the object or region. |
 
-Grounding DINO selects the highest-scoring matching box using the configured
-box and text thresholds. SAM 3 then refines that box into a single-channel
-white-on-black mask. If no region matches, the tool raises an error. The
-Grounding DINO model bundle loads lazily on first use and is reused afterward.
+The output is a pixel box `[x1, y1, x2, y2]`. Coordinates are clamped to the image
+and reordered. The tool always returns a box: if the model output has fewer than
+four numbers or yields a degenerate box, it returns `[0, 0, width, height]`. The
+box is a locator only; it does not produce a mask. The Qwen model bundle loads
+lazily on first use and is reused afterward.
 
 ### `edit_object`
 
@@ -291,25 +293,22 @@ Unsupported filter names and values outside `[-1, 1]` raise an error.
 ## Inference configuration and runtime
 
 The framework uses fixed backbones: FLUX.2 Klein base 4B for editing and generation,
-SAM 3 for segmentation, Grounding DINO for text-region grounding, and ObjectClear
+SAM 3 for segmentation, Qwen3.5-2B for region location, and ObjectClear
 for removal. `InferenceConfig` contains their inference settings rather than model IDs:
 
 ```python
 from framework import (
     InferenceConfig,
-    GroundingDinoInferenceConfig,
     KleinInferenceConfig,
     ObjectClearInferenceConfig,
+    QwenLocateInferenceConfig,
     image_editing_tools,
 )
 
 tools = image_editing_tools(
     inference_config=InferenceConfig(
         klein=KleinInferenceConfig(num_inference_steps=6),
-        grounding_dino=GroundingDinoInferenceConfig(
-            box_threshold=0.35,
-            text_threshold=0.25,
-        ),
+        qwen_locate=QwenLocateInferenceConfig(max_new_tokens=32),
         object_clear=ObjectClearInferenceConfig(guidance_scale=2.5),
     )
 )
@@ -317,7 +316,7 @@ tools = image_editing_tools(
 
 `KleinInferenceConfig` controls `num_inference_steps`, `guidance_scale`,
 `mask_context_padding`, and `remove_lora` (`fal` or `slopshop`).
-`GroundingDinoInferenceConfig` controls the box and text confidence thresholds.
+`QwenLocateInferenceConfig` controls `max_new_tokens` for the locator's JSON reply.
 `Sam3InferenceConfig` controls `mask_threshold`. `ObjectClearInferenceConfig`
 controls `num_inference_steps`,
 `guidance_scale`, and `working_min_side`. The required project-wide
@@ -327,8 +326,8 @@ SAM 3. Defaults preserve the existing inference settings.
 
 At runtime, the model device is selected in this order: Apple MPS when
 available, otherwise CUDA, otherwise CPU. `ModelPool` eagerly loads Klein,
-SAM 3, and ObjectClear during construction; it loads Grounding DINO on the first
-`segment_region` call. Tools constructed together by
+SAM 3, and ObjectClear during construction; it loads Qwen3.5-2B on the first
+`locate_region` call. Tools constructed together by
 `image_editing_tools()` share the same pool. For explicit pool reuse, pass it
 as the first argument:
 
