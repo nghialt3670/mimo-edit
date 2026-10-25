@@ -26,25 +26,23 @@ def _red_square():
 
 
 class Flux2KleinAddTests(unittest.TestCase):
-    def test_mask_add_resizes_slightly_mismatched_model_output(self):
+    def test_mask_add_pastes_edited_crop_at_working_size(self):
         image = Image.new("RGB", (200, 160), "black")
         mask = Image.new("L", image.size, 0)
         mask.paste(255, (50, 40, 80, 70))
-        edited = Image.new("RGB", (48, 48), "black")
-        edited.paste((255, 0, 0), (10, 10, 40, 40))  # mask area inside the crop
+        # Crop is (40, 30, 90, 80) -> 50x50, contained to WORK_SIZE (1024x1024).
+        # The mask region maps to roughly (205, 205)-(819, 819) in working space.
+        edited = Image.new("RGB", (1024, 1024), "black")
+        edited.paste((255, 0, 0), (205, 205, 819, 819))
 
         with (
             patch(
-                "framework.inference.flux2_klein.add_object.generate_klein_edit",
+                "framework.inference.flux2_klein.add_object._generate_klein_edit",
                 return_value=edited,
             ),
             patch(
                 "framework.inference.flux2_klein.utils.harmonize_with_mask",
                 side_effect=lambda _p, image, _m: image,
-            ),
-            patch(
-                "framework.inference.flux2_klein.add_object.segment_added_object",
-                side_effect=lambda _pool, _before, _after, region, *_a, **_k: region,
             ),
             patch(
                 "framework.inference.flux2_klein.utils.vitmatte_alpha",

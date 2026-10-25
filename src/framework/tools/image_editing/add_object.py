@@ -44,8 +44,7 @@ def _validate_add_object_args(
 
 @register_tool(
     "add_object",
-    "Add an object to the image. Provide exactly one placement input: box or mask. "
-    "Say in anchor what the object goes on or next to (for example 'on the blue cooler').",
+    "Add an object to the image. Provide exactly one placement input: box or mask.",
     {
         "image": {
             "type": "image",
@@ -53,7 +52,7 @@ def _validate_add_object_args(
         },
         "prompt": {
             "type": "string",
-            "description": "Describe the object to add, including appearance and orientation. Do not describe where it goes; use anchor for that.",
+            "description": "Describe the object to add, including appearance and orientation.",
         },
         "box": {
             "type": "array",
@@ -78,10 +77,6 @@ def add_object(
     _validate_add_object_args(image, prompt, mask, box)
 
     if box is not None:
-        return flux2_klein_add_object_with_box(
-            ctx.model_pool, image, box, prompt
-        )
+        return flux2_klein_add_object_with_box(ctx.model_pool, image, box, prompt)
 
-    return flux2_klein_add_object_with_mask(
-        ctx.model_pool, image, mask, prompt
-    )
+    return flux2_klein_add_object_with_mask(ctx.model_pool, image, mask, prompt)

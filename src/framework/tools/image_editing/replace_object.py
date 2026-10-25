@@ -51,11 +51,6 @@ def _validate_replace_object_args(
             "description": "Optional description of the object Klein should put in place of the selected object. Provide this or replacement, not both.",
             "nullable": True,
         },
-        "anchor": {
-            "type": "string",
-            "description": "With prompt: short placement phrase for what the new object rests on, e.g. 'on the wooden deck'. Inferred from the image if omitted.",
-            "nullable": True,
-        },
     },
     "image",
 )
@@ -65,13 +60,10 @@ def replace_object(
     mask: Image.Image,
     replacement: Image.Image | None = None,
     prompt: str | None = None,
-    anchor: str | None = None,
 ) -> Image.Image:
     bounds = _validate_replace_object_args(image, mask, replacement, prompt)
     if prompt is not None:
-        return flux2_klein_replace_object(
-            ctx.model_pool, image, mask, prompt, anchor=anchor
-        )
+        return flux2_klein_replace_object(ctx.model_pool, image, mask, prompt)
 
     clean = flux2_klein_remove_object(ctx.model_pool, image, mask)
     if replacement is None:

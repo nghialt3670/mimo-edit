@@ -79,7 +79,6 @@ def flux2_klein_add_object_with_box(
     image: Image.Image,
     box: Sequence[float],
     prompt: str,
-    **kwargs,
 ) -> Image.Image:
     """Add an object near an XYXY pixel box and paste the entire edited crop."""
     if not isinstance(image, Image.Image):

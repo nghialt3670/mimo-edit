@@ -37,7 +37,6 @@ class ReplaceObjectToolTests(unittest.TestCase):
                 self.image,
                 self.mask,
                 prompt="a small red boat",
-                anchor="on the water",
             )
 
         self.assertIs(result, self.image)
@@ -47,7 +46,6 @@ class ReplaceObjectToolTests(unittest.TestCase):
             self.image,
             self.mask,
             "a small red boat",
-            anchor="on the water",
         )
 
     def test_image_replacement_keeps_existing_remove_and_paste_behavior(self):

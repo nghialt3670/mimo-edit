@@ -629,6 +629,25 @@ def _load_or_generate_first_turn(
     return command
 
 
+def _file_stem(sample_id: str, annotation_index: int) -> str:
+    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", str(sample_id)).strip("._") or "sample"
+    return f"{annotation_index:06d}_{safe_id}"
+
+
+def load_saved_actions(run_dir: Path, file_stem: str) -> list[str]:
+    """Return the code of every act step in a saved sample's trajectory.json, in order."""
+    trajectory_path = run_dir / "logs" / file_stem / "trajectory.json"
+    steps = json.loads(trajectory_path.read_text(encoding="utf-8"))
+    return [step["act"] for step in steps if "act" in step]
+
+
+def _copy_saved_trajectory(run_dir: Path, file_stem: str, log_dir: Path) -> None:
+    source_dir = run_dir / "logs" / file_stem
+    for name in ("trajectory.json", "trajectory.txt", "agent_raw_trajectory.json", "raw.json"):
+        if (source_dir / name).is_file():
+            shutil.copyfile(source_dir / name, log_dir / name)
+
+
 def run_one(
     record: dict[str, Any],
     annotation_index: int,
@@ -641,6 +660,7 @@ def run_one(
     tools: list[Any],
     max_steps: int = 16,
     first_turn: FirstTurnConfig | None = None,
+    from_run: Path | None = None,
 ) -> dict[str, Any]:
     _validate_prompt_mode(prompt_mode)
     from framework.core import Agent, local_executor
@@ -648,8 +668,7 @@ def run_one(
     seed = seed_random_generators()
     start = time.perf_counter()
     sample_id = record.get("sample_id") or f"annotation_{annotation_index}"
-    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", str(sample_id)).strip("._") or "sample"
-    file_stem = f"{annotation_index:06d}_{safe_id}"
+    file_stem = _file_stem(sample_id, annotation_index)
     log_dir = output_dir / "logs" / file_stem
     images_dir = output_dir / "results" / "images"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -717,7 +736,12 @@ def run_one(
         command = None
         agent_started_at = time.perf_counter()
         try:
-            if first_turn is None:
+            if from_run is not None:
+                actions = load_saved_actions(from_run, file_stem)
+                result = agent.replay_actions(actions, task, objects=objects)
+                entry["replayed_actions"] = len(actions)
+                entry["fallback_used"] = agent.fallback_used
+            elif first_turn is None:
                 result = agent.send(task, objects=objects)
             else:
                 command = _load_or_generate_first_turn(
@@ -890,6 +914,8 @@ def run_one(
                 f"Failed to save trajectory/raw debug files for "
                 f"{sample_id}: {save_error!r}"
             )
+    if from_run is not None:
+        _copy_saved_trajectory(from_run, file_stem, log_dir)
     return entry
 
 
@@ -926,6 +952,7 @@ def run_benchmark(
     rerun_completed: bool = False,
     display_fn: Any = None,
     first_turn: FirstTurnConfig | None = None,
+    from_run: Path | None = None,
 ) -> list[dict[str, Any]]:
     _validate_prompt_mode(prompt_mode)
     if rerun_completed and not resume:
@@ -1048,6 +1075,20 @@ def run_benchmark(
             status="running",
             refresh=True,
         )
+        if from_run is not None and not (
+            from_run / "logs" / _file_stem(sample_id, annotation_index) / "trajectory.json"
+        ).is_file():
+            tqdm.write(f"Skipped {sample_id}: no saved trajectory in {from_run}.")
+            results_by_index[annotation_index] = {
+                "benchmark": benchmark,
+                "prompt_mode": prompt_mode,
+                "sample_id": sample_id,
+                "annotation_index": annotation_index,
+                "status": "skipped",
+                "error": "No saved trajectory in the source run.",
+            }
+            persist_results()
+            continue
         if rerun_completed:
             log_dir = _clear_sample_artifacts(
                 output_dir, records[annotation_index], annotation_index
@@ -1071,6 +1112,7 @@ def run_benchmark(
             model=model,
             tools=tools,
             first_turn=first_turn,
+            from_run=from_run,
         )
         results_by_index[annotation_index] = result
         persist_results()

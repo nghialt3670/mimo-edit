@@ -55,8 +55,6 @@ class Case:
     # XYXY in the annotation's 1024-pixel space; used when there is no entity.
     box: tuple[int, int, int, int] | None = None
     remove_first: bool = False
-    # What the planner would pass: the placement phrase.
-    anchor: str | None = None
     note: str = ""
 
 
@@ -65,21 +63,18 @@ CASES: dict[str, Case] = {
         "mirage:10.jpg",
         "a small dog",
         entity_id="e3",
-        anchor="sitting on the wooden bench on the right",
         note="add a small dog onto v3",
     ),
     "m10_sticker_on_box": Case(
         "mirage:10.jpg",
         "a yellow sticker",
         entity_id="e5",
-        anchor="stuck on the front of the blue cooler",
         note="add a yellow sticker onto v5",
     ),
     "m30_roses_on_doormat": Case(
         "mirage:30.jpg",
         "a bunch of roses",
         entity_id="e4",
-        anchor="lying on the black doormat",
         note="add a bunch of roses onto v4",
     ),
     "m30_dog_replace_middle_cat": Case(
@@ -87,7 +82,6 @@ CASES: dict[str, Case] = {
         "a dog",
         entity_id="e3",
         remove_first=True,
-        anchor="sitting on the wet wooden deck",
         note="replace v3 with a dog",
     ),
     "m57_dog_replace_rope": Case(
@@ -95,7 +89,6 @@ CASES: dict[str, Case] = {
         "a lying dog",
         entity_id="e5",
         remove_first=True,
-        anchor="lying on the concrete ground",
         note="replace v5 with a lying dog (touches two image edges)",
     ),
 }
@@ -148,21 +141,20 @@ def run_case(
         torch.manual_seed(args.seed)
         debug: dict = {}
         start = time.time()
-        anchor = case.anchor
-        options = {"anchor": anchor, "refine": args.refine}
         try:
             if direct:
                 output = flux2_klein_replace_object(
-                    pool, source, mask, case.prompt, debug=debug, **options
+                    pool,
+                    source,
+                    mask,
+                    case.prompt,
+                    debug=debug,
+                    refine=args.refine,
                 )
             elif how == "box":
-                output = flux2_klein_add_object_with_box(
-                    pool, base, box, case.prompt, debug=debug, **options
-                )
+                output = flux2_klein_add_object_with_box(pool, base, box, case.prompt)
             else:
-                output = flux2_klein_add_object_with_mask(
-                    pool, base, mask, case.prompt, debug=debug, **options
-                )
+                output = flux2_klein_add_object_with_mask(pool, base, mask, case.prompt)
         except NothingAdded as exc:
             print(f"  [{how}] FAILED: {exc}")
             continue

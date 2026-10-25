@@ -293,6 +293,7 @@ class Agent:
         }
         self._agent = self._build_agent()
         self._started = False
+        self.fallback_used = False
 
     def _build_agent(self) -> _ObservationCodeAgent:
         base_executor = self.executor or local_executor()
@@ -498,6 +499,58 @@ class Agent:
 
         if step.error is None and step.is_final_answer:
             return self._turn_result(code_output.output, raw=None)
+        steps = list(inner._run_stream(task=inner.task, max_steps=inner.max_steps))
+        return self._turn_result(steps[-1].output, raw=None)
+
+    def replay_actions(
+        self,
+        codes: list[str],
+        text: str,
+        *,
+        objects: dict[str, Any] | None = None,
+    ) -> TurnResult:
+        """Execute saved code actions in order, calling the model only after a failure or unfinished run."""
+        self._begin_turn(text, objects)
+        inner = self._agent
+        self.fallback_used = False
+        for number, code in enumerate(codes, start=1):
+            step = ActionStep(
+                step_number=number,
+                timing=Timing(start_time=time.time()),
+                model_output_message=ChatMessage(
+                    role=MessageRole.ASSISTANT, content=code
+                ),
+                model_output=code,
+                code_action=code,
+                tool_calls=[
+                    ToolCall(
+                        name="python_interpreter", arguments=code, id=f"call_{number}"
+                    )
+                ],
+            )
+            inner.memory.steps.append(step)
+            code_output = None
+            try:
+                code_output = inner.python_executor(code)
+                step.observations = (
+                    "Execution logs:\n"
+                    + code_output.logs
+                    + "Last output from code snippet:\n"
+                    + truncate_content(str(code_output.output))
+                )
+                step.action_output = code_output.output
+                step.is_final_answer = code_output.is_final_answer
+            except Exception as exc:
+                step.error = AgentExecutionError(str(exc), inner.logger)
+            step.timing.end_time = time.time()
+            _ObservationFormatter()(step, agent=inner)
+
+            if step.error is not None:
+                break
+            if step.is_final_answer:
+                return self._turn_result(code_output.output, raw=None)
+
+        self.fallback_used = True
         steps = list(inner._run_stream(task=inner.task, max_steps=inner.max_steps))
         return self._turn_result(steps[-1].output, raw=None)
 

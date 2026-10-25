@@ -150,7 +150,7 @@ def main() -> None:
     _ensure_image_root(args.image_root)
 
     from evaluation.common import run_benchmark
-    from evaluation.first_turn import build_first_turn_config
+    from evaluation.first_turn import build_first_turn_config, build_from_run
     from evaluation.notebook import (
         create_agent_model,
         create_run_directory,
@@ -201,6 +201,7 @@ def main() -> None:
     print(f"MIRA-Bench agent ready: {model.model_id}")
 
     first_turn = build_first_turn_config(args, run_dir)
+    from_run = build_from_run(args)
     results = run_benchmark(
         context.records,
         sample_indices,
@@ -214,6 +215,7 @@ def main() -> None:
         rerun_completed=args.rerun_completed,
         display_fn=None,
         first_turn=first_turn,
+        from_run=from_run,
     )
 
     completed = sum(result["status"] == "completed" for result in results)

@@ -111,6 +111,29 @@ def add_first_turn_arguments(parser: argparse.ArgumentParser) -> None:
         default=None,
         help=f"JSONL file for saved first-turn commands. Defaults to <output root>/{FIRST_TURN_FILE_NAME}.",
     )
+    parser.add_argument(
+        "--from-run",
+        type=Path,
+        default=None,
+        help=(
+            "Existing run_<timestamp> directory. Re-executes each sample's saved act code "
+            "without model calls, falling back to the model only when a code action fails."
+        ),
+    )
+
+
+def build_from_run(args: argparse.Namespace) -> Path | None:
+    if args.from_run is None:
+        return None
+    if args.first_turn != "off":
+        raise ValueError("--from-run cannot be combined with --first-turn.")
+    if getattr(args, "resume", False):
+        raise ValueError("--from-run cannot be combined with --resume.")
+    run_dir = args.from_run.expanduser().resolve()
+    if not (run_dir / "logs").is_dir():
+        raise FileNotFoundError(f"--from-run has no logs directory: {run_dir}")
+    print(f"Re-executing saved code from: {run_dir}")
+    return run_dir
 
 
 def build_first_turn_config(

@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 
 from ..pool import ModelPool
-from .placement import GUIDE, placement
+from .placement import GUIDE
 from .utils import (
     WORK_SIZE,
     binary_mask,
@@ -15,7 +15,7 @@ from .utils import (
     segment_added_object,
 )
 
-REPLACE_PROMPT = "Replace the object in the middle of the image with {prompt}{where}. {guide} Add nothing else and preserve the surroundings."
+REPLACE_PROMPT = "Replace the object in the middle of the image with {prompt}. {guide} Add nothing else and preserve the surroundings."
 # The old object's area (grown by this fraction of its size) takes Klein's pixels.
 OLD_AREA_GROW = 0.04
 
@@ -36,15 +36,13 @@ def flux2_klein_replace_object(
     prompt: str,
     debug: dict | None = None,
     *,
-    anchor: str | None = None,
     refine: bool = False,
 ) -> Image.Image:
     """Replace the object at a white mask with ``prompt``, without removing it first.
 
     Klein edits a crop around the mask and replaces the object directly. SAM3 and
     the change map segment the new object, ViTMatte gives its alpha, and the old
-    object's footprint also takes Klein's pixels. ``anchor`` and ``refine`` work
-    as in ``flux2_klein_add_object_with_box``.
+    object's footprint also takes Klein's pixels.
     """
     if not isinstance(image, Image.Image) or not isinstance(mask, Image.Image):
         raise TypeError("image and mask must both be PIL images")
@@ -73,7 +71,7 @@ def flux2_klein_replace_object(
     out = generate_klein_edit(
         pool.flux2_klein_pipeline,
         working_image,
-        REPLACE_PROMPT.format(prompt=prompt, where=placement(anchor), guide=GUIDE),
+        REPLACE_PROMPT.format(prompt=prompt, guide=GUIDE),
         inference_config,
     )
     if out.size != working_image.size:
@@ -98,6 +96,5 @@ def flux2_klein_replace_object(
             klein=edited,
             matte=matte,
             minimum=object_mask,
-            anchor=anchor,
         )
     return result
