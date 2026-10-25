@@ -6,7 +6,6 @@ from framework.inference import (
     flux2_klein_remove_object,
     flux2_klein_replace_object,
 )
-from framework.inference.flux2_klein.placement import describe_anchor
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -70,8 +69,6 @@ def replace_object(
 ) -> Image.Image:
     bounds = _validate_replace_object_args(image, mask, replacement, prompt)
     if prompt is not None:
-        if anchor is None:
-            anchor = describe_anchor(image, bounds, prompt, replacing=True)
         return flux2_klein_replace_object(
             ctx.model_pool, image, mask, prompt, anchor=anchor
         )

@@ -31,16 +31,13 @@ class ReplaceObjectToolTests(unittest.TestCase):
                 "framework.tools.image_editing.replace_object.flux2_klein_replace_object",
                 return_value=self.image,
             ) as replace,
-            patch(
-                "framework.tools.image_editing.replace_object.describe_anchor",
-                return_value="on the water",
-            ) as describe,
         ):
             result = replace_object(
                 self.ctx,
                 self.image,
                 self.mask,
                 prompt="a small red boat",
+                anchor="on the water",
             )
 
         self.assertIs(result, self.image)
@@ -52,7 +49,6 @@ class ReplaceObjectToolTests(unittest.TestCase):
             "a small red boat",
             anchor="on the water",
         )
-        describe.assert_called_once()
 
     def test_image_replacement_keeps_existing_remove_and_paste_behavior(self):
         cleaned = Image.new("RGB", self.image.size, "gray")

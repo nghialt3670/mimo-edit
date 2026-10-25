@@ -37,7 +37,6 @@ from framework.inference.flux2_klein import (
     flux2_klein_remove_object,
     flux2_klein_replace_object,
 )
-from framework.inference.flux2_klein.placement import describe_anchor
 from framework.inference.flux2_klein.utils import NothingAdded
 from scripts.test_edit_object import (
     find_region,
@@ -150,9 +149,6 @@ def run_case(
         debug: dict = {}
         start = time.time()
         anchor = case.anchor
-        if args.auto_anchor:
-            anchor = describe_anchor(base, box, case.prompt, replacing=direct)
-            print(f"  auto anchor: {anchor!r}")
         options = {"anchor": anchor, "refine": args.refine}
         try:
             if direct:
@@ -200,11 +196,6 @@ def main() -> None:
         "--refine",
         action="store_true",
         help="after pasting, refine the whole image with Klein instead of PCT-Net",
-    )
-    parser.add_argument(
-        "--auto-anchor",
-        action="store_true",
-        help="ignore the hard-coded anchors and ask Gemini for each placement phrase",
     )
     parser.add_argument(
         "--replace-mode",

@@ -9,7 +9,6 @@ from framework.inference import (
     flux2_klein_add_object_with_mask,
     mice_add_object_with_box,
 )
-from framework.inference.flux2_klein.placement import describe_anchor
 
 from ..context import ToolContext
 from ..registry import register_tool
@@ -85,13 +84,6 @@ def add_object(
     _validate_add_object_args(image, prompt, mask, box)
     if anchor is not None:
         validate_text("anchor", anchor)
-    if anchor is None:
-        region = (
-            tuple(int(v) for v in box)
-            if box is not None
-            else mask.convert("L").getbbox()
-        )
-        anchor = describe_anchor(image, region, prompt)
     options = {"anchor": anchor}
 
     if box is not None:
