@@ -5,9 +5,13 @@ from __future__ import annotations
 import argparse
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from framework.inference import ModelPool
 
 
-def _parse_args() -> argparse.Namespace:
+def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run MMEdit mixed-prompt inference on RefEdit-Bench annotations."
     )
@@ -73,7 +77,7 @@ def _parse_args() -> argparse.Namespace:
     from evaluation.first_turn import add_first_turn_arguments
 
     add_first_turn_arguments(parser)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.limit is not None and args.limit < 1:
         parser.error("--limit must be greater than zero.")
@@ -100,8 +104,8 @@ def _resolve_launch_path(path: Path) -> Path:
     return path.resolve() if path.is_absolute() else (launch_dir / path).resolve()
 
 
-def main() -> None:
-    args = _parse_args()
+def main(argv: list[str] | None = None, pool: ModelPool | None = None) -> None:
+    args = _parse_args(argv)
 
     from framework.utils.project import load_project_environment
 
@@ -189,7 +193,7 @@ def main() -> None:
     print(f"Evaluation run: {run_dir}")
 
     model = create_agent_model()
-    tools = image_editing_tools()
+    tools = image_editing_tools(pool=pool)
     print(f"RefEdit-Bench agent ready: {model.model_id}")
 
     first_turn = build_first_turn_config(args, run_dir)
