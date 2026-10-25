@@ -8,7 +8,7 @@ from typing import Any, Literal
 
 from PIL import Image
 from tqdm.auto import tqdm
-
+import re
 from evaluation.common import HFImageLoader, read_jsonl
 from evaluation.metrics import (
     crop_pair_to_mask_roi,

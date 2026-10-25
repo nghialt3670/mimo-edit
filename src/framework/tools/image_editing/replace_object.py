@@ -48,7 +48,7 @@ def _validate_replace_object_args(
         },
         "prompt": {
             "type": "string",
-            "description": "Optional description of the object Klein should put in place of the selected object. Provide this or replacement, not both.",
+            "description": "Optional description of the object Klein should put in place of the selected object. If the instruction locates the object by another visible object, include that anchor phrase here (e.g. 'a black camera on the table'). Provide this or replacement, not both.",
             "nullable": True,
         },
     },

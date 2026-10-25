@@ -52,7 +52,7 @@ def _validate_add_object_args(
         },
         "prompt": {
             "type": "string",
-            "description": "Describe the object to add, including appearance and orientation.",
+            "description": "Describe the object to add, including appearance and orientation. If the instruction relates it to another visible object, include that anchor phrase here (e.g. 'a zebra next to the wooden fence').",
         },
         "box": {
             "type": "array",
