@@ -6,14 +6,16 @@ import numpy as np
 from PIL import Image, ImageFilter, ImageOps
 
 from ..pool import ModelPool
-from .add_object import _generate_with_retry, _paste
 from .placement import GUIDE, placement
-from .utils import WORK_SIZE, binary_mask, generate_klein_edit
-
-REPLACE_PROMPTS = (
-    "Replace the object in the middle of the image with {prompt}{where}. {guide} Add nothing else and preserve the surroundings.",
-    "Remove the object in the middle of the image and clearly draw {prompt}{where} in its place as a distinct, fully visible object. {guide} Add nothing else and preserve the surroundings.",
+from .utils import (
+    WORK_SIZE,
+    binary_mask,
+    blend_edit,
+    generate_klein_edit,
+    segment_added_object,
 )
+
+REPLACE_PROMPT = "Replace the object in the middle of the image with {prompt}{where}. {guide} Add nothing else and preserve the surroundings."
 # The old object's area (grown by this fraction of its size) takes Klein's pixels.
 OLD_AREA_GROW = 0.04
 
@@ -68,32 +70,27 @@ def flux2_klein_replace_object(
     working_image = ImageOps.contain(original_crop, (WORK_SIZE, WORK_SIZE))
     old_mask = binary_mask(mask.crop(crop_box))
 
-    def generate(attempt: int) -> Image.Image:
-        out = generate_klein_edit(
-            pool.flux2_klein_pipeline,
-            working_image,
-            REPLACE_PROMPTS[attempt].format(
-                prompt=prompt, where=placement(anchor), guide=GUIDE
-            ),
-            inference_config,
-            seed_offset=attempt,
-        )
-        if out.size != working_image.size:
-            out = out.resize(working_image.size, Image.Resampling.LANCZOS)
-        return out.resize(original_crop.size, Image.Resampling.LANCZOS)
-
-    edited, object_mask = _generate_with_retry(
-        pool, original_crop, old_mask, prompt, generate, debug
+    out = generate_klein_edit(
+        pool.flux2_klein_pipeline,
+        working_image,
+        REPLACE_PROMPT.format(prompt=prompt, where=placement(anchor), guide=GUIDE),
+        inference_config,
     )
-    result, matte = _paste(
+    if out.size != working_image.size:
+        out = out.resize(working_image.size, Image.Resampling.LANCZOS)
+    edited = out.resize(original_crop.size, Image.Resampling.LANCZOS)
+    object_mask = segment_added_object(
+        pool, original_crop, edited, old_mask, prompt, debug=debug
+    )
+    result, matte = blend_edit(
         pool,
         original,
         crop_box,
         edited,
         object_mask,
-        refine,
-        debug,
+        harmonize=refine,
         extra_weight=_old_area_weight(mask, crop_box),
+        debug=debug,
     )
     if debug is not None:
         debug.update(

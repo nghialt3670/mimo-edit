@@ -55,11 +55,6 @@ def _validate_add_object_args(
             "type": "string",
             "description": "Describe the object to add, including appearance and orientation. Do not describe where it goes; use anchor for that.",
         },
-        "anchor": {
-            "type": "string",
-            "description": "Short placement phrase: a preposition plus the object or surface the new object rests on or sits next to, e.g. 'on the wooden bench'. Inferred from the image if omitted.",
-            "nullable": True,
-        },
         "box": {
             "type": "array",
             "description": "Approximate placement box [x1, y1, x2, y2] in image pixels.",
@@ -79,18 +74,14 @@ def add_object(
     prompt: str,
     mask: Image.Image | None = None,
     box: list[float] | None = None,
-    anchor: str | None = None,
 ) -> Image.Image:
     _validate_add_object_args(image, prompt, mask, box)
-    if anchor is not None:
-        validate_text("anchor", anchor)
-    options = {"anchor": anchor}
 
     if box is not None:
         return flux2_klein_add_object_with_box(
-            ctx.model_pool, image, box, prompt, **options
+            ctx.model_pool, image, box, prompt
         )
 
     return flux2_klein_add_object_with_mask(
-        ctx.model_pool, image, mask, prompt, **options
+        ctx.model_pool, image, mask, prompt
     )

@@ -42,18 +42,15 @@ class ReplaceTests(unittest.TestCase):
             patch.object(module, "generate_klein_edit", fake_generate),
             patch.object(
                 module,
-                "_generate_with_retry",
-                lambda pool, before, region, prompt, generate, debug: (
-                    generate(0),
-                    new_object,
-                ),
+                "segment_added_object",
+                lambda pool, before, after, region, prompt, debug=None: new_object,
             ),
             patch.object(
                 module,
-                "_paste",
-                lambda pool, original, crop_box, edited, obj, refine, debug, extra_weight: (
-                    original,
-                    extra_weight,
+                "blend_edit",
+                lambda pool, scene, crop_box, after, obj, **kwargs: (
+                    scene,
+                    kwargs["extra_weight"],
                 ),
             ),
         ):
