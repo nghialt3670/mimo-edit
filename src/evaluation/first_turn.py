@@ -147,3 +147,119 @@ def build_first_turn_config(
     path = (args.first_turn_file or output_root / FIRST_TURN_FILE_NAME).expanduser().resolve()
     print(f"First-turn mode: {args.first_turn} ({path})")
     return FirstTurnConfig(mode=args.first_turn, store=FirstTurnStore(path))
+
+
+def _file_stem(sample_id: str, annotation_index: int) -> str:
+    # Mirrors evaluation.common._file_stem; results.jsonl log_dir can be stale.
+    safe_id = re.sub(r"[^A-Za-z0-9._-]+", "_", str(sample_id)).strip("._") or "sample"
+    return f"{annotation_index:06d}_{safe_id}"
+
+
+def _find_log_dir(run_dir: Path, sample_id: str, annotation_index: int) -> Path | None:
+    # Folder index can differ from the recorded annotation_index; fall back to a unique name match.
+    logs = run_dir / "logs"
+    exact = logs / _file_stem(sample_id, annotation_index)
+    if exact.is_dir():
+        return exact
+    safe_id = _file_stem(sample_id, 0).split("_", 1)[1]
+    matches = sorted(logs.glob(f"*_{safe_id}"))
+    return matches[0] if len(matches) == 1 else None
+
+
+def _first_model_output(raw_steps: list[Any]) -> str | None:
+    for step in raw_steps:
+        output = step.get("model_output") if isinstance(step, dict) else None
+        if isinstance(output, str) and output.strip():
+            return output
+    return None
+
+
+def export_run_to_first_turn(
+    run_dir: Path, store_path: Path | None = None
+) -> tuple[Path, int, list[str]]:
+    """Write each sample's first code action from a finished run into a first-turn store.
+
+    Task, objects, and prompt types come from results/results.jsonl. The first act
+    and its thought come from logs/<sample>/trajectory.json; the raw model output and
+    model id come from logs/<sample>/raw.json when present.
+
+    Returns the store path, the number of exported entries, and the skipped sample ids.
+    """
+    run_dir = run_dir.expanduser().resolve()
+    results_path = run_dir / "results" / "results.jsonl"
+    if not results_path.is_file():
+        raise FileNotFoundError(f"No results file: {results_path}")
+    path = (store_path or run_dir / FIRST_TURN_FILE_NAME).expanduser().resolve()
+    store = FirstTurnStore(path)
+
+    latest: dict[str, dict[str, Any]] = {}
+    for line in results_path.read_text(encoding="utf-8").splitlines():
+        if line.strip():
+            record = json.loads(line)
+            latest[str(record.get("sample_id"))] = record
+
+    exported = 0
+    skipped: list[str] = []
+    for sample_id, record in latest.items():
+        log_dir = _find_log_dir(run_dir, sample_id, int(record["annotation_index"]))
+        trajectory_path = log_dir / "trajectory.json" if log_dir else None
+        if trajectory_path is None or not trajectory_path.is_file():
+            skipped.append(sample_id)
+            continue
+        steps = json.loads(trajectory_path.read_text(encoding="utf-8"))
+        first = next((step for step in steps if "act" in step), None)
+        if first is None:
+            skipped.append(sample_id)
+            continue
+
+        code = str(first["act"])
+        thought = str(first.get("thought") or "")
+        raw_output = code
+        model_id = None
+        raw_path = log_dir / "raw.json"
+        if raw_path.is_file():
+            raw = json.loads(raw_path.read_text(encoding="utf-8"))
+            model_id = raw.get("model_id")
+            raw_output = _first_model_output(raw.get("agent_raw_steps") or []) or code
+
+        references = record.get("reference_prompts") or []
+        objects = ["image_0", *(ref["variable"] for ref in references)]
+        task = str(record["instruction"])
+        store.put(
+            FirstTurnEntry(
+                sample_id=sample_id,
+                prompt_mode=str(record["prompt_mode"]),
+                prompt_signature=prompt_signature(ref["type"] for ref in references),
+                fingerprint=task_fingerprint(task, dict.fromkeys(objects)),
+                task=task,
+                objects=sorted(objects),
+                thought=thought,
+                code=code,
+                raw_output=raw_output,
+                model_id=model_id,
+            )
+        )
+        exported += 1
+    return path, exported, skipped
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Export a finished run's first code actions to a first-turn JSONL store."
+    )
+    parser.add_argument("--run-dir", type=Path, required=True, help="run_<timestamp> directory.")
+    parser.add_argument(
+        "--store",
+        type=Path,
+        default=None,
+        help=f"Output JSONL. Defaults to <run-dir>/{FIRST_TURN_FILE_NAME}.",
+    )
+    args = parser.parse_args()
+    path, exported, skipped = export_run_to_first_turn(args.run_dir, args.store)
+    print(f"Exported {exported} first-turn entries to {path}")
+    if skipped:
+        print(f"Skipped {len(skipped)} samples without a first act: {', '.join(skipped)}")
+
+
+if __name__ == "__main__":
+    main()
