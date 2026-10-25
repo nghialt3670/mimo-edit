@@ -270,10 +270,9 @@ def build_agent_context(
         "final edited image.",
         (
             "For each referenced existing entity, use segment_object with its "
-            "natural-language description. No visual selector is supplied for "
-            "these references; do not assume annotation boxes, points, scribbles, "
-            "masks, or crops are available. For a spatial destination without a "
-            "supplied box, infer placement from the image and instruction."
+            "natural-language description. Do not assume any other visual input "
+            "is available. For a spatial destination, infer placement from the image "
+            "and instruction."
             if prompt_mode == "text"
             else (
                 "When the instruction contains a visual placeholder such as "
@@ -299,8 +298,23 @@ def build_agent_context(
         "unmentioned details. Use other registered tools when they better match the "
         "requested operation.",
     ]
+    lines.append(
+        "If text segmentation finds no match, do not repeat near-identical prompts; "
+        "try a more concise visible-object description."
+        if prompt_mode == "text"
+        else "If text segmentation finds no match, do not repeat near-identical prompts: "
+        "try `locate_region` with a concise visible-object description and pass the "
+        "returned box to `segment_object`'s box input, or use a provided visual anchor "
+        "with `segment_object`'s point, box, or scribble input."
+    )
     spatial_anchor_needed = needs_spatial_anchor_box(sample.get("instruction") or "")
-    if spatial_anchor_needed:
+    if spatial_anchor_needed and prompt_mode == "text":
+        lines.append(
+            "For relative placement, estimate the anchor's extent from the image and "
+            "calculate an approximate destination [x1, y1, x2, y2] in pixels; clamp it "
+            "to the image and pass it as add_object(box=...)."
+        )
+    elif spatial_anchor_needed:
         lines.append(
             "For relative placement without a supplied destination box, use the "
             "anchor's full bounding box and image dimensions to calculate an "
@@ -348,7 +362,8 @@ def build_agent_context(
                 lines.append(
                     f"Reference {token}{description_line} use {selector_line}."
                 )
-    lines.append("Do not invent selector coordinates.")
+    if prompt_mode == "mixed":
+        lines.append("Do not invent selector coordinates.")
     return "\n".join(lines)
 
 

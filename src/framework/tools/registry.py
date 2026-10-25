@@ -118,6 +118,7 @@ class _RegisteredTool(Tool):
 
 registry = ToolRegistry()
 register_tool = registry.register
+text_mode_registry = ToolRegistry()
 
 
 def build_tools(context: ToolContext | None = None) -> list[Tool]:

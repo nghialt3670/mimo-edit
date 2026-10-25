@@ -268,10 +268,14 @@ def main() -> int:
         print("Error: --poll-interval must be at least 1 second.")
         return 2
 
-    api_key = os.environ.get("GEMINI_API_KEY")
+    api_key = (
+        os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("MMEDIT_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+    )
     if not api_key:
         print(
-            "Error: GEMINI_API_KEY is not set.\n"
+            "Error: GEMINI_API_KEY, MMEDIT_API_KEY or GOOGLE_API_KEY is not set.\n"
             "macOS/Linux: export GEMINI_API_KEY='your-api-key'\n"
             "PowerShell:  $env:GEMINI_API_KEY='your-api-key'",
             file=sys.stderr,

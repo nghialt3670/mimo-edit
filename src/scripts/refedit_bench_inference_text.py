@@ -159,7 +159,7 @@ def main(argv: list[str] | None = None, pool: ModelPool | None = None) -> None:
     print(f"Evaluation run: {run_dir}")
 
     model = create_agent_model()
-    tools = image_editing_tools(pool=pool)
+    tools = image_editing_tools(pool=pool, prompt_mode="text")
     print(f"RefEdit-Bench agent ready: {model.model_id}")
 
     first_turn = build_first_turn_config(args, run_dir)

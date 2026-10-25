@@ -8,7 +8,7 @@ from framework.inference import (
 )
 
 from ..context import ToolContext
-from ..registry import register_tool
+from ..registry import register_tool, text_mode_registry
 from ..utils import validate_image, validate_number_list, validate_text
 
 
@@ -45,6 +45,27 @@ def _validate_segmentation_coordinates(
     x, y = numbers
     if not (0 <= x < image.width and 0 <= y < image.height):
         raise ValueError(f"{name} must be inside the image")
+
+
+@text_mode_registry.register(
+    "segment_object",
+    "Select an object by a natural-language description and return its mask.",
+    {
+        "image": {"type": "image", "description": "Image containing the object."},
+        "text": {"type": "string", "description": "Description of the object to select."},
+    },
+    "image",
+)
+def segment_object_by_text(ctx: ToolContext, image: Image.Image, text: str) -> Image.Image:
+    validate_image("image", image)
+    validate_text("text", text)
+    masks = sam3_segment_masks(ctx.model_pool, image, text)
+    if not masks:
+        raise ValueError(
+            f"No object matched the text description: {text!r}. Try a concise "
+            "visible-object description."
+        )
+    return masks[0]
 
 
 @register_tool(

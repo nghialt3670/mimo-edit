@@ -66,11 +66,11 @@ class ModelPool:
         seed_random_generators()
         self.config = config if config is not None else InferenceConfig()
         self.device = get_device()
-        self._pipelines = {
-            self.flux2_klein_pipeline,
-            self.flux2_klein_inpaint_pipeline,
-            self.sam3_pipelines,
-        }
+        # self._pipelines = {
+        #     self.flux2_klein_pipeline,
+        #     self.flux2_klein_inpaint_pipeline,
+        #     self.sam3_pipelines,
+        # }
 
     @cached_property
     def flux2_klein_pipeline(self) -> Flux2KleinPipeline:

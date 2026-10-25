@@ -1,17 +1,17 @@
 """Generate first-turn commands through the Gemini Batch API.
 
-Workflow: ``build_requests`` -> ``write_batch_inputs`` -> ``submit_batch`` (returns
-immediately) -> later ``collect_results`` once the batch has completed. Results are
+Workflow: ``build_requests`` -> ``write_batch_inputs`` -> ``submit_batch`` (runs
+submit_batch.py and waits) -> ``collect_results`` on batch_output.jsonl. Results are
 written into a ``FirstTurnStore`` so that inference can replay them with ``--first-turn replay``.
 """
 
 from __future__ import annotations
 
 import json
-import os
+import subprocess
+import sys
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -34,11 +34,10 @@ from .first_turn import (
 )
 
 BATCH_ENDPOINT = "/v1/chat/completions"
-DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
 REQUESTS_FILE = "requests.jsonl"
+OUTPUT_FILE = "batch_output.jsonl"
 MANIFEST_FILE = "manifest.json"
-BATCH_FILE = "batch.json"
-COMPLETED_STATUS = "completed"
+SUBMIT_SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "submit_batch.py"
 
 
 @dataclass(frozen=True, slots=True)
@@ -205,65 +204,15 @@ def load_manifest(work_dir: Path) -> dict[str, Any]:
     return json.loads((work_dir / MANIFEST_FILE).read_text(encoding="utf-8"))
 
 
-def _credentials() -> tuple[str, str]:
-    api_key = os.environ.get("MMEDIT_API_KEY") or os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        raise EnvironmentError("Set MMEDIT_API_KEY or GOOGLE_API_KEY.")
-    base_url = os.environ.get("MMEDIT_OPENAI_BASE_URL") or DEFAULT_BASE_URL
-    return api_key, base_url
-
-
-def _genai_client() -> Any:
-    from google import genai
-
-    api_key, _ = _credentials()
-    return genai.Client(api_key=api_key)
-
-
-def _openai_client() -> Any:
-    from openai import OpenAI
-
-    api_key, base_url = _credentials()
-    return OpenAI(api_key=api_key, base_url=base_url)
-
-
-def submit_batch(work_dir: Path, *, display_name: str) -> str:
-    """Upload the JSONL input, create the batch job, and save its id. Returns immediately."""
-    from google.genai import types
-
-    uploaded = _genai_client().files.upload(
-        file=str(work_dir / REQUESTS_FILE),
-        config=types.UploadFileConfig(display_name=display_name, mime_type="jsonl"),
+def submit_batch(work_dir: Path) -> int:
+    """Run submit_batch.py on the work directory's requests and wait for it to finish."""
+    work_dir = work_dir.resolve()
+    result = subprocess.run(
+        [sys.executable, str(SUBMIT_SCRIPT), str(work_dir / REQUESTS_FILE)],
+        cwd=work_dir,
+        check=False,
     )
-    batch = _openai_client().batches.create(
-        input_file_id=uploaded.name,
-        endpoint=BATCH_ENDPOINT,
-        completion_window="24h",
-    )
-    state = {
-        "batch_id": batch.id,
-        "input_file": uploaded.name,
-        "submitted_at": datetime.now(timezone.utc).isoformat(),
-    }
-    (work_dir / BATCH_FILE).write_text(json.dumps(state, indent=2), encoding="utf-8")
-    return batch.id
-
-
-def _batch_id(work_dir: Path) -> str:
-    return json.loads((work_dir / BATCH_FILE).read_text(encoding="utf-8"))["batch_id"]
-
-
-def batch_status(work_dir: Path) -> str:
-    return _openai_client().batches.retrieve(_batch_id(work_dir)).status
-
-
-def download_results(work_dir: Path) -> str:
-    """Download the completed batch output file as text."""
-    batch = _openai_client().batches.retrieve(_batch_id(work_dir))
-    if batch.status != COMPLETED_STATUS or not batch.output_file_id:
-        raise RuntimeError(f"Batch is not completed (status: {batch.status}).")
-    content = _genai_client().files.download(file=batch.output_file_id)
-    return content.decode("utf-8") if isinstance(content, bytes) else str(content)
+    return result.returncode
 
 
 def parse_batch_output(
@@ -336,10 +285,8 @@ def collect_results(
 ) -> CollectReport:
     """Store accepted first-turn commands from a local output file or the completed batch download."""
     manifest = load_manifest(work_dir)
-    if output_file is None:
-        lines = download_results(work_dir).splitlines()
-    else:
-        lines = output_file.read_text(encoding="utf-8").splitlines()
+    path = output_file or work_dir / OUTPUT_FILE
+    lines = path.read_text(encoding="utf-8").splitlines()
     store = FirstTurnStore(store_path or Path(manifest["store_path"]))
     return parse_batch_output(
         lines,

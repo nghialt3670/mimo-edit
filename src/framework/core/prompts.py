@@ -11,10 +11,7 @@ create in code persist across later steps and later user turns. Never invent a v
 not appeared in an Observation or been created by your own earlier code.
 
 Use the registered tools for image operations; do not import Pillow or other unauthorized
-modules. If text segmentation finds no match, do not repeat near-identical prompts: try
-`locate_region` with a concise visible-object description and pass the returned box to
-`segment_object`'s box input, or use a provided visual anchor with `segment_object`'s point,
-box, or scribble input. Before calling `add_object` with a box,
+modules. Before calling `add_object` with a box,
 ensure its four coordinates are finite, ordered as `[x1, y1, x2, y2]`, and within the image
 bounds (use `image.size` for its width and height); prefer a supplied box or mask over guessed
 coordinates.
