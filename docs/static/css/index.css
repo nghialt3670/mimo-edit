@@ -1,0 +1,66 @@
+body {
+  font-family: 'Noto Sans', sans-serif;
+}
+
+.publication-title,
+.publication-authors {
+  font-family: 'Google Sans', sans-serif;
+}
+
+.publication-authors {
+  margin-bottom: 0.5rem;
+}
+
+.author-block {
+  display: inline-block;
+  margin: 0 0.35rem;
+}
+
+.publication-links {
+  margin-top: 1.5rem;
+}
+
+.link-block {
+  display: inline-block;
+  margin: 0.25rem;
+}
+
+figure {
+  margin: 1.5rem 0;
+}
+
+figure img {
+  display: block;
+  margin: 0 auto;
+  border-radius: 6px;
+}
+
+figure figcaption {
+  font-size: 0.95rem;
+  color: #4a4a4a;
+  margin-top: 0.75rem;
+}
+
+.teaser-figure figcaption {
+  font-size: 1rem;
+}
+
+.table-container {
+  overflow-x: auto;
+  margin-top: 1rem;
+}
+
+.table td,
+.table th {
+  text-align: center;
+  vertical-align: middle;
+}
+
+pre {
+  overflow-x: auto;
+  font-size: 0.9rem;
+}
+
+footer.footer {
+  padding: 2rem 1.5rem;
+}

@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="description" content="Mixed-Edit: Mixed-Modality Referencing for Compositional Image Editing.">
+  <meta name="keywords" content="image editing, visual referencing, compositional editing, multimodal prompting, LLM agents">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mixed-Edit: Mixed-Modality Referencing for Compositional Image Editing</title>
+
+  <link href="https://fonts.googleapis.com/css?family=Google+Sans|Noto+Sans" rel="stylesheet">
+  <link rel="stylesheet" href="./static/css/bulma.min.css">
+  <link rel="stylesheet" href="./static/css/index.css">
+  <link rel="icon" href="./static/images/favicon.svg">
+
+  <script defer src="./static/js/fontawesome.all.min.js"></script>
+  <script src="./static/js/index.js"></script>
+</head>
+<body>
+
+<nav class="navbar" role="navigation" aria-label="main navigation">
+  <div class="navbar-brand">
+    <a role="button" class="navbar-burger" aria-label="menu" aria-expanded="false">
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+      <span aria-hidden="true"></span>
+    </a>
+  </div>
+  <div class="navbar-menu">
+    <div class="navbar-start" style="flex-grow: 1; justify-content: center;">
+      <a class="navbar-item" href="#abstract">Abstract</a>
+      <a class="navbar-item" href="#method">Method</a>
+      <a class="navbar-item" href="#experiments">Experiments</a>
+      <a class="navbar-item" href="#bibtex">BibTeX</a>
+    </div>
+  </div>
+</nav>
+
+<section class="hero">
+  <div class="hero-body">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered">
+        <div class="column has-text-centered">
+          <h1 class="title is-1 publication-title">Mixed-Edit: Mixed-Modality Referencing for Compositional Image Editing</h1>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">Phuong-Dao Duong Dinh,</span>
+            <span class="author-block">Tin-Nghia Le,</span>
+            <span class="author-block">Vinh-Tiep Nguyen</span>
+          </div>
+          <div class="is-size-5 publication-authors">
+            <span class="author-block">University of Information Technology, Vietnam National University Ho Chi Minh City</span>
+          </div>
+
+          <div class="publication-links">
+            <span class="link-block">
+              <a href="https://github.com/nghialt3670/mmedit" class="external-link button is-normal is-rounded is-dark">
+                <span class="icon"><i class="fab fa-github"></i></span>
+                <span>Code</span>
+              </a>
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container is-max-desktop">
+    <figure class="teaser-figure">
+      <img src="./static/images/teaser.webp" alt="Comparison of text-only, mask-based, and mixed-modality prompting for image editing." loading="lazy">
+      <figcaption class="has-text-centered">
+        Comparison of text-only, mask-based, and mixed-modality prompting for image editing.
+      </figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="section" id="abstract">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Abstract</h2>
+        <div class="content has-text-justified">
+          <p>
+            Instruction-based image editing has advanced rapidly with the emergence of large vision-language models (LVLMs).
+            However, accurately expressing editing intentions remains challenging, particularly in complex scenes containing
+            multiple similar objects. Text-only prompts often require lengthy spatial descriptions to identify editing targets,
+            while mask-based approaches demand precise manual annotations.
+          </p>
+          <p>
+            To address these limitations, we introduce <i>Mixed-Edit</i>, a mixed-modality prompting paradigm for compositional
+            image editing that enables users to express editing intentions by naturally combining textual instructions with
+            visual references, including points, bounding boxes, and scribbles. Unlike conventional approaches that primarily
+            use visual prompts as spatial constraints, our paradigm treats them as explicit, referable visual entities that can
+            be directly associated with editing operations within a unified instruction.
+          </p>
+          <p>
+            We develop a framework that transforms heterogeneous visual references into structured symbolic representations,
+            employs LLM-based reasoning to generate executable editing programs, and integrates modular editing tools for
+            controllable and compositional image manipulation. We further construct mixed-modality benchmark extensions and
+            conduct comprehensive evaluations, including human studies and quantitative experiments. Experimental results
+            demonstrate roughly threefold faster prompt formulation, improved editing-intention fidelity, particularly in
+            challenging referential scenarios, and higher user satisfaction compared with text-only approaches.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="overview">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered has-text-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3">Overview</h2>
+        <figure>
+          <img src="./static/images/inputoutput.webp" alt="Overview of Mixed-Edit for compositional image editing." loading="lazy">
+          <figcaption class="has-text-left">
+            Overview of Mixed-Edit for compositional image editing. By combining natural language instructions with visual
+            references, including points, bounding boxes, and scribbles, users can explicitly specify editing targets and
+            perform different editing operations.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="method">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3 has-text-centered">Method</h2>
+        <div class="content has-text-justified">
+          <p>
+            The architecture has three components: (1) Mixed-Modality Input, (2) Mixed-Modality Processor, and
+            (3) Reasoning and Execution Loop. Visual prompts are mapped to symbolic identifiers such as
+            <code>point_0</code>, <code>box_0</code>, or <code>scribble_0</code>. The LLM plans over the unified
+            textual instruction without receiving raw images, coordinates, or masks, while the execution engine
+            resolves each reference to its region when a tool is invoked.
+          </p>
+        </div>
+        <figure>
+          <img src="./static/images/pipeline.webp" alt="Overall architecture of the Mixed-Edit framework." loading="lazy">
+          <figcaption class="has-text-left">
+            Overall architecture of the proposed multimodal interactive image editing framework. The system transforms
+            multimodal user inputs into structured instructions, performs reasoning-based planning to generate executable
+            editing commands, and produces the final edited image through a modular execution pipeline with an interactive
+            feedback loop.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="./static/images/edit_object_flow.webp" alt="Example of object-oriented local editing with the edit_object tool." loading="lazy">
+          <figcaption class="has-text-left">
+            Example of object-oriented local editing using the <code>edit_object</code> tool. A user-specified visual reference
+            is resolved to the target object, which is segmented and cropped for localized editing. The result is refined,
+            harmonized, and composited back into the original image. The implementation combines SAM 3, FLUX.2 Klein 4B,
+            VitMatte, PtcNet, and Python Pillow.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="experiments">
+  <div class="container is-max-desktop">
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3 has-text-centered">Datasets</h2>
+        <div class="content has-text-justified">
+          <p>
+            We evaluate on four datasets: two human-evaluation datasets, <b>Mixed-Eval</b> (50 images, 30 instructions) and
+            <b>Mixed-Interact</b> (60 images, 45 tasks), and two mixed-modality extensions of existing benchmarks,
+            <b>Mixed-RefEdit</b> (200 instructions, from RefEdit) and <b>Mixed-CompBench</b> (2609 instructions, from CompBench).
+            Each instruction has paired text-only and mixed-modality forms.
+          </p>
+        </div>
+        <figure>
+          <img src="./static/images/dataset.webp" alt="Representative examples from Mixed-Eval and Mixed-Interact." loading="lazy">
+          <figcaption class="has-text-left">
+            Representative examples from Mixed-Eval and Mixed-Interact. Mixed-Eval provides paired text-only and mixed-modality
+            instructions for evaluating editing outcomes, while Mixed-Interact includes editing objectives for assessing
+            interactive prompt formulation.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="./static/images/dataset_distribution.webp" alt="Distribution of dataset characteristics and task complexity." loading="lazy">
+          <figcaption class="has-text-left">
+            Distribution of dataset characteristics and editing task complexity. The distribution includes 47.1% single-object
+            and 52.9% multi-object cases.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="./static/images/annotation_process.webp" alt="Mixed-modality annotation pipeline." loading="lazy">
+          <figcaption class="has-text-left">
+            Mixed-modality annotation pipeline. Text-based instructions are converted into paired mixed-modality instructions
+            through referring-expression identification, mask-guided grounding, instruction rewriting, and visual prompt
+            synthesis.
+          </figcaption>
+        </figure>
+        <figure>
+          <img src="./static/images/annotation_results.webp" alt="Representative annotation examples from RefEdit and CompBench." loading="lazy">
+          <figcaption class="has-text-left">
+            Representative annotation examples from RefEdit (Easy and Hard) and CompBench (Local and Multi-object).
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3 has-text-centered">Referential Editing (Mixed-RefEdit)</h2>
+        <div class="content has-text-justified">
+          <p>
+            Ours--Mixed outperforms Ours--Text on all three metrics in both difficulty categories. On Hard cases,
+            semantic consistency ($SC_{\mathrm{avg}}$) rises from 6.92 to 7.77, and the drop from Easy to Hard shrinks
+            from 0.93 to 0.10 points.
+          </p>
+        </div>
+        <div class="table-container">
+          <table class="table is-bordered is-striped is-hoverable is-fullwidth is-size-7">
+            <thead>
+              <tr>
+                <th rowspan="2">Method</th>
+                <th colspan="3" class="has-text-centered">Easy</th>
+                <th colspan="3" class="has-text-centered">Hard</th>
+                <th rowspan="2" class="has-text-centered">&Delta;SC<sub>avg</sub></th>
+              </tr>
+              <tr>
+                <th>SC<sub>avg</sub> &uarr;</th><th>PQ<sub>avg</sub> &uarr;</th><th>O<sub>avg</sub> &uarr;</th>
+                <th>SC<sub>avg</sub> &uarr;</th><th>PQ<sub>avg</sub> &uarr;</th><th>O<sub>avg</sub> &uarr;</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>InstructPix2Pix</td><td>3.52</td><td>5.66</td><td>2.82</td><td>3.80</td><td>6.02</td><td>3.22</td><td>0.28</td></tr>
+              <tr><td>MagicBrush</td><td>4.18</td><td>6.10</td><td>3.67</td><td>4.11</td><td>6.16</td><td>3.56</td><td>-0.07</td></tr>
+              <tr><td>UltraEdit</td><td>3.68</td><td><b>6.98</b></td><td>3.40</td><td>2.93</td><td>6.23</td><td>2.59</td><td>-0.75</td></tr>
+              <tr><td>HIVE</td><td>3.15</td><td>5.26</td><td>2.42</td><td>3.22</td><td>5.52</td><td>2.47</td><td>0.07</td></tr>
+              <tr><td>HQ-Edit</td><td>2.58</td><td>5.39</td><td>2.37</td><td>2.95</td><td>5.21</td><td>2.60</td><td>0.37</td></tr>
+              <tr><td>CosXLEdit</td><td>3.20</td><td>6.73</td><td>2.88</td><td>3.44</td><td><b>6.65</b></td><td>2.88</td><td>0.24</td></tr>
+              <tr><td>PnP</td><td>4.25</td><td>5.59</td><td>3.55</td><td>2.45</td><td>5.62</td><td>2.27</td><td>-1.80</td></tr>
+              <tr><td>InstructDiffusion</td><td>4.16</td><td>4.71</td><td>3.31</td><td>4.09</td><td>4.94</td><td>3.16</td><td>-0.07</td></tr>
+              <tr><td>OmniEdit</td><td>4.18</td><td>6.15</td><td>3.68</td><td>4.07</td><td>6.28</td><td>3.53</td><td>-0.11</td></tr>
+              <tr><td>InstructDiffusion-HA</td><td>5.01</td><td>5.88</td><td>4.21</td><td>4.56</td><td>6.10</td><td>3.75</td><td>-0.45</td></tr>
+              <tr><td>RefEdit</td><td>5.47</td><td>5.85</td><td>4.68</td><td>4.51</td><td>6.48</td><td>3.93</td><td>-0.96</td></tr>
+              <tr><td>RefEdit-SD3</td><td>5.46</td><td>6.36</td><td>4.99</td><td>4.47</td><td>6.21</td><td>3.98</td><td>-0.99</td></tr>
+              <tr class="is-selected"><td>Ours--Text</td><td>7.85</td><td>4.36</td><td>5.36</td><td>6.92</td><td>4.39</td><td>4.73</td><td>-0.93</td></tr>
+              <tr class="is-selected"><td><b>Ours--Mixed</b></td><td><b>7.87</b></td><td>4.53</td><td><b>5.47</b></td><td><b>7.77</b></td><td>4.50</td><td><b>5.41</b></td><td>-0.10</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3 has-text-centered">Compositional Editing (Mixed-CompBench)</h2>
+        <div class="content has-text-justified">
+          <p>
+            Compared with Ours--Text, Ours--Mixed improves Preference Fidelity (PF) from 8.12 to 9.16, Consistency from 8.71
+            to 9.11, Perceptual Quality (PQ) from 6.41 to 7.10, and Overall from 6.74 to 7.70 (a 14.2% relative gain).
+            Local CLIP Text Score ($LC\text{-}T$) is slightly higher than Ours--Text but below FLUX.1 Kontext, which
+            reflects a known limitation of CLIP-based similarity for multi-object edits.
+          </p>
+        </div>
+        <div class="table-container">
+          <table class="table is-bordered is-striped is-hoverable is-fullwidth is-size-7">
+            <thead>
+              <tr>
+                <th>Method</th>
+                <th>LC-T &uarr;</th><th>PF &uarr;</th><th>Consistency &uarr;</th><th>PQ &uarr;</th><th>Overall &uarr;</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Step1X-Edit</td><td>20.459</td><td>6.28</td><td>7.94</td><td>5.43</td><td>5.05</td></tr>
+              <tr><td>BAGEL</td><td>20.856</td><td>8.06</td><td>8.80</td><td>5.94</td><td>6.24</td></tr>
+              <tr><td>FLUX.1 Kontext</td><td><b>21.020</b></td><td>8.24</td><td>8.62</td><td>6.16</td><td>6.51</td></tr>
+              <tr><td>Qwen-Image-Edit</td><td>20.722</td><td>8.50</td><td>8.32</td><td>6.01</td><td>6.39</td></tr>
+              <tr class="is-selected"><td>Ours--Text</td><td>20.050</td><td>8.12</td><td>8.71</td><td>6.41</td><td>6.74</td></tr>
+              <tr class="is-selected"><td><b>Ours--Mixed</b></td><td>20.240</td><td><b>9.16</b></td><td><b>9.11</b></td><td><b>7.10</b></td><td><b>7.70</b></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <figure>
+          <img src="./static/images/comparison.webp" alt="Qualitative comparison of Mixed-Edit with existing image editing methods." loading="lazy">
+          <figcaption class="has-text-left">
+            Qualitative comparison of Mixed-Edit with existing image editing methods on complex editing tasks. The examples
+            illustrate differences in target identification, instruction execution, and preservation of unrelated visual content.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+
+    <div class="columns is-centered">
+      <div class="column is-four-fifths">
+        <h2 class="title is-3 has-text-centered">User Study</h2>
+        <div class="content has-text-justified">
+          <p>
+            In the Mixed-Interact study, participants formulated equivalent editing intentions under text-only and
+            mixed-modality conditions. Mixed-modality prompting reduced prompt formulation time by roughly threefold and
+            received higher satisfaction ratings.
+          </p>
+        </div>
+        <figure>
+          <img src="./static/images/user_satisfaction.webp" alt="Stage 1 user study results." loading="lazy">
+          <figcaption class="has-text-left">
+            Stage 1 human evaluation of editing-intention fidelity, output satisfaction, and user preference.
+          </figcaption>
+        </figure>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="bibtex">
+  <div class="container is-max-desktop content">
+    <h2 class="title">BibTeX</h2>
+    <pre><code>@misc{duongdinh2026mixededit,
+  title     = {Mixed-Edit: Mixed-Modality Referencing for Compositional Image Editing},
+  author    = {Duong Dinh, Phuong-Dao and Le, Tin-Nghia and Nguyen, Vinh-Tiep},
+  year      = {2026},
+  note      = {Preprint}
+}</code></pre>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="content has-text-centered">
+      <p>
+        Website template adapted from the <a href="https://nerfies.github.io">Nerfies</a> project page.
+      </p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
