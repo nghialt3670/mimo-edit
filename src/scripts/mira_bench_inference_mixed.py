@@ -11,7 +11,7 @@ DATASET_ID = "ziqiangoodgood/MIRAGE"
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run MMEdit mixed-prompt inference on MIRA-Bench annotations."
+        description="Run MixedPrompt mixed-prompt inference on MIRA-Bench annotations."
     )
     annotation_group = parser.add_mutually_exclusive_group()
     annotation_group.add_argument(
@@ -137,14 +137,14 @@ def main() -> None:
     load_project_environment()
 
     if args.annotations:
-        os.environ["MMEDIT_MIRA_BENCH_ANNOTATIONS"] = str(
+        os.environ["MIXED_PROMPT_MIRA_BENCH_ANNOTATIONS"] = str(
             _resolve_launch_path(args.annotations)
         )
     if args.annotation_run:
-        os.environ["MMEDIT_MIRA_BENCH_ANNOTATIONS"] = ""
-        os.environ["MMEDIT_MIRA_BENCH_ANNOTATION_RUN"] = args.annotation_run
+        os.environ["MIXED_PROMPT_MIRA_BENCH_ANNOTATIONS"] = ""
+        os.environ["MIXED_PROMPT_MIRA_BENCH_ANNOTATION_RUN"] = args.annotation_run
     if args.output_root:
-        os.environ["MMEDIT_MIRA_BENCH_OUTPUT_DIR"] = str(
+        os.environ["MIXED_PROMPT_MIRA_BENCH_OUTPUT_DIR"] = str(
             _resolve_launch_path(args.output_root)
         )
     _ensure_image_root(args.image_root)

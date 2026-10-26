@@ -250,7 +250,7 @@ def main(prompt_mode: Literal["text", "mixed"] | None = None) -> None:
         type=Path,
         default=Path(
             os.environ.get(
-                "MMEDIT_REFEDIT_BENCH_ANNOTATIONS",
+                "MIXED_PROMPT_REFEDIT_BENCH_ANNOTATIONS",
                 ".out/annotation/refedit_bench/refedit_bench_mixed.jsonl",
             )
         ).expanduser(),
@@ -265,7 +265,7 @@ def main(prompt_mode: Literal["text", "mixed"] | None = None) -> None:
         parser.add_argument(
             "--prompt-mode",
             choices=("text", "mixed"),
-            default=os.environ.get("MMEDIT_REFEDIT_BENCH_PROMPT_MODE", "mixed"),
+            default=os.environ.get("MIXED_PROMPT_REFEDIT_BENCH_PROMPT_MODE", "mixed"),
             help="Inference prompt mode whose saved run should be scored.",
         )
     parser.add_argument(
@@ -287,8 +287,8 @@ def main(prompt_mode: Literal["text", "mixed"] | None = None) -> None:
     selected_mode = prompt_mode or args.prompt_mode
     if selected_mode not in ("text", "mixed"):
         raise ValueError(f"Unsupported prompt mode: {selected_mode!r}")
-    run_env = f"MMEDIT_REFEDIT_BENCH_{selected_mode.upper()}_RUN"
-    run_name = os.environ.get(run_env) or os.environ.get("MMEDIT_REFEDIT_BENCH_RUN")
+    run_env = f"MIXED_PROMPT_REFEDIT_BENCH_{selected_mode.upper()}_RUN"
+    run_name = os.environ.get(run_env) or os.environ.get("MIXED_PROMPT_REFEDIT_BENCH_RUN")
     records = list(read_jsonl(args.annotations))
     if not records:
         raise ValueError(f"No RefEdit annotations found in {args.annotations}")

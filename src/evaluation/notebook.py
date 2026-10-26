@@ -15,22 +15,22 @@ PromptMode = Literal["text", "mixed"]
 
 _BENCHMARKS = {
     "compbench": (
-        "MMEDIT_COMPBENCH_ANNOTATIONS",
-        "MMEDIT_COMPBENCH_ANNOTATION_RUN",
+        "MIXED_PROMPT_COMPBENCH_ANNOTATIONS",
+        "MIXED_PROMPT_COMPBENCH_ANNOTATION_RUN",
         "compbench_local_multiobject_mixed.jsonl",
-        "MMEDIT_COMPBENCH_OUTPUT_DIR",
+        "MIXED_PROMPT_COMPBENCH_OUTPUT_DIR",
     ),
     "refedit_bench": (
-        "MMEDIT_REFEDIT_BENCH_ANNOTATIONS",
-        "MMEDIT_REFEDIT_BENCH_ANNOTATION_RUN",
+        "MIXED_PROMPT_REFEDIT_BENCH_ANNOTATIONS",
+        "MIXED_PROMPT_REFEDIT_BENCH_ANNOTATION_RUN",
         "refedit_bench_mixed.jsonl",
-        "MMEDIT_REFEDIT_BENCH_OUTPUT_DIR",
+        "MIXED_PROMPT_REFEDIT_BENCH_OUTPUT_DIR",
     ),
     "mira_bench": (
-        "MMEDIT_MIRA_BENCH_ANNOTATIONS",
-        "MMEDIT_MIRA_BENCH_ANNOTATION_RUN",
+        "MIXED_PROMPT_MIRA_BENCH_ANNOTATIONS",
+        "MIXED_PROMPT_MIRA_BENCH_ANNOTATION_RUN",
         "mira_bench_mixed.jsonl",
-        "MMEDIT_MIRA_BENCH_OUTPUT_DIR",
+        "MIXED_PROMPT_MIRA_BENCH_OUTPUT_DIR",
     ),
 }
 
@@ -241,18 +241,18 @@ def resolve_run_directory(
 
 
 def create_agent_model(model_id: str | None = None) -> Any:
-    """Create the shared OpenAI-compatible model; defaults to MMEDIT_MODEL_ID."""
+    """Create the shared OpenAI-compatible model; defaults to MIXED_PROMPT_MODEL_ID."""
     load_project_environment()
     seed_random_generators()
-    api_key = os.environ.get("MMEDIT_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("MIXED_PROMPT_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
-        raise EnvironmentError("Set MMEDIT_API_KEY or GOOGLE_API_KEY.")
+        raise EnvironmentError("Set MIXED_PROMPT_API_KEY or GOOGLE_API_KEY.")
 
     from smolagents import OpenAIModel
 
     return OpenAIModel(
-        model_id=model_id or os.environ.get("MMEDIT_MODEL_ID") or "gemini-2.5-flash",
-        api_base=os.environ.get("MMEDIT_OPENAI_BASE_URL")
+        model_id=model_id or os.environ.get("MIXED_PROMPT_MODEL_ID") or "gemini-2.5-flash",
+        api_base=os.environ.get("MIXED_PROMPT_OPENAI_BASE_URL")
         or "https://generativelanguage.googleapis.com/v1beta/openai/",
         api_key=api_key,
         temperature=0,

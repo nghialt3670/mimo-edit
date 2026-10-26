@@ -133,9 +133,9 @@ class MiraBenchBenchmarkResolutionTests(unittest.TestCase):
             clear=False,
         ):
             for name in (
-                "MMEDIT_MIRA_BENCH_ANNOTATIONS",
-                "MMEDIT_MIRA_BENCH_ANNOTATION_RUN",
-                "MMEDIT_MIRA_BENCH_OUTPUT_DIR",
+                "MIXED_PROMPT_MIRA_BENCH_ANNOTATIONS",
+                "MIXED_PROMPT_MIRA_BENCH_ANNOTATION_RUN",
+                "MIXED_PROMPT_MIRA_BENCH_OUTPUT_DIR",
                 "ANNOTATE_OUT",
             ):
                 os.environ.pop(name, None)

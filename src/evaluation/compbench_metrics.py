@@ -20,6 +20,7 @@ from .common import HFImageLoader, read_jsonl
 
 PromptMode = Literal["text", "mixed"]
 METRIC_NAMES = ("LC-T", "LC-I", "PSNR", "SSIM", "LPIPS")
+PSNR_MAX_DB = 100.0
 IMAGE_SIZE = (512, 512)
 
 
@@ -233,7 +234,8 @@ def _score_pair(
     generated_background = generated_tensor * background
 
     with torch.inference_mode():
-        psnr = models["psnr"](generated_background, source_background).item()
+        # Identical backgrounds give infinite PSNR (zero MSE); cap it to keep the mean finite.
+        psnr = min(models["psnr"](generated_background, source_background).item(), PSNR_MAX_DB)
         ssim = models["ssim"](generated_background, source_background).item()
         lpips = models["lpips"](
             generated_background * 2.0 - 1.0,

@@ -39,11 +39,11 @@ def latest_annotation_file() -> Path:
 
     load_project_environment()
     filename = "mira_bench_mixed.jsonl"
-    explicit = os.environ.get("MMEDIT_MIRA_BENCH_ANNOTATIONS")
+    explicit = os.environ.get("MIXED_PROMPT_MIRA_BENCH_ANNOTATIONS")
     if explicit:
         return Path(explicit).expanduser()
     root = Path(os.environ.get("ANNOTATE_OUT") or ANNOTATION_ROOT).expanduser()
-    run = os.environ.get("MMEDIT_MIRA_BENCH_ANNOTATION_RUN") or "latest"
+    run = os.environ.get("MIXED_PROMPT_MIRA_BENCH_ANNOTATION_RUN") or "latest"
     runs = sorted(root.glob(f"run_*/{filename}"))
     if run != "latest":
         runs = [r for r in runs if r.parent.name == run]

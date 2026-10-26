@@ -24,7 +24,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--benchmark", choices=["refedit_bench", "compbench", "mira_bench"])
     parser.add_argument("--prompt-mode", default="mixed", choices=["mixed", "text"])
     parser.add_argument("--first-turn-file", type=Path, help="FirstTurnStore JSONL to read and write.")
-    parser.add_argument("--model", help="Model id; defaults to MMEDIT_MODEL_ID.")
+    parser.add_argument("--model", help="Model id; defaults to MIXED_PROMPT_MODEL_ID.")
     parser.add_argument("--start-index", type=int, default=0)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--samples-file", type=Path, help="Only generate the metadata.row_index values listed in this text file.")

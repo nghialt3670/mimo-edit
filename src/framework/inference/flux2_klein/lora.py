@@ -91,7 +91,7 @@ _PROMPT_EMBEDS: dict[str, torch.Tensor] = {}
 
 # The model pool may reuse a Klein pipeline across operations/threads.
 _KLEIN_INFERENCE_LOCK = RLock()
-_LORA_SOURCES_ATTR = "_mimo_klein_lora_sources"
+_LORA_SOURCES_ATTR = "_mixed_prompt_klein_lora_sources"
 
 _REQUIRED_LORA_API = (
     "load_lora_weights",

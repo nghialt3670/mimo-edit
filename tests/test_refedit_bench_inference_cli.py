@@ -116,10 +116,10 @@ class RefEditBenchInferenceCliTests(unittest.TestCase):
                 _parse_args()
 
     def test_resolves_relative_paths_from_bundle_launch_directory(self):
-        with patch.dict("os.environ", {"EVAL_START_DIR": "/tmp/mmedit-run"}):
+        with patch.dict("os.environ", {"EVAL_START_DIR": "/tmp/mixed-prompt-run"}):
             path = _resolve_launch_path(Path("annotations.jsonl"))
 
-        self.assertEqual(path, Path("/tmp/mmedit-run/annotations.jsonl").resolve())
+        self.assertEqual(path, Path("/tmp/mixed-prompt-run/annotations.jsonl").resolve())
 
     def test_general_entrypoint_dispatches_to_mixed_by_default(self):
         from scripts import refedit_bench_inference

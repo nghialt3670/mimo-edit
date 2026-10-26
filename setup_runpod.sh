@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# One-time RunPod environment setup for the mimo-edit evaluation project.
+# One-time RunPod environment setup for the mixed-prompt evaluation project.
 # Does NOT run the evaluation and does NOT download large model weights.
 # Usage: bash setup_runpod.sh [project_dir]
 set -Eeuo pipefail
 
-PROJECT_DIR="${1:-/workspace/mimo-edit}"
+PROJECT_DIR="${1:-/workspace/mixed-prompt}"
 PYTHON_REQUEST="3.13.11"
 TORCH_VERSION="2.11.0"
 TORCHVISION_VERSION="0.26.0"
@@ -16,7 +16,7 @@ die()  { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 trap 'warn "Setup stopped on line $LINENO. Existing .out/, repository data, and model caches were not deleted."' ERR
 
 [[ "$(uname -s)" == "Linux" ]] || die "Run this script INSIDE your RunPod Linux pod, not on macOS."
-[[ -f "$PROJECT_DIR/pyproject.toml" ]] || die "Missing $PROJECT_DIR/pyproject.toml. Pass the path to your cloned repo: bash setup_runpod.sh /workspace/mimo-edit"
+[[ -f "$PROJECT_DIR/pyproject.toml" ]] || die "Missing $PROJECT_DIR/pyproject.toml. Pass the path to your cloned repo: bash setup_runpod.sh /workspace/mixed-prompt"
 command -v python3 >/dev/null || die 'System python3 is required.'
 command -v curl >/dev/null || die 'curl is required.'
 command -v nvidia-smi >/dev/null || die 'nvidia-smi unavailable. Start a GPU pod before running setup.'
@@ -51,7 +51,7 @@ umask 077
 ENV_FILE="$PROJECT_DIR/.runpod_env.sh"
 cat > "$ENV_FILE" <<'EOF'
 #!/usr/bin/env bash
-# Source in a new shell: source /workspace/mimo-edit/.runpod_env.sh
+# Source in a new shell: source /workspace/mixed-prompt/.runpod_env.sh
 export PATH="$HOME/.local/bin:$PATH"
 export XDG_CACHE_HOME=/workspace/.cache
 export HF_HOME=/workspace/.cache/huggingface
@@ -65,7 +65,7 @@ EOF
 # Make the env file path independent of the project folder.
 chmod 600 "$ENV_FILE"
 if ! grep -Fq "source \"$ENV_FILE\"" "$HOME/.bashrc" 2>/dev/null; then
-    printf '\n# mimo-edit RunPod environment\n[ -f "%s" ] && source "%s"\n' "$ENV_FILE" "$ENV_FILE" >> "$HOME/.bashrc"
+    printf '\n# mixed-prompt RunPod environment\n[ -f "%s" ] && source "%s"\n' "$ENV_FILE" "$ENV_FILE" >> "$HOME/.bashrc"
 fi
 # shellcheck disable=SC1090
 source "$ENV_FILE"
@@ -227,7 +227,7 @@ token = os.environ.get('HF_TOKEN') or configured.get('HF_TOKEN')
 if not token and (home / 'token').exists():
     token = (home / 'token').read_text().strip()
 if not token:
-    print('HF_TOKEN missing. Add HF_TOKEN=hf_... to /workspace/mimo-edit/.env or log in using `hf auth login`.')
+    print('HF_TOKEN missing. Add HF_TOKEN=hf_... to /workspace/mixed-prompt/.env or log in using `hf auth login`.')
 else:
     path = home / 'token'
     path.write_text(token.strip() + '\n')

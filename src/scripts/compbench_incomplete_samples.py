@@ -58,14 +58,14 @@ def main() -> None:
     load_project_environment()
 
     if args.annotations:
-        os.environ["MMEDIT_COMPBENCH_ANNOTATIONS"] = str(
+        os.environ["MIXED_PROMPT_COMPBENCH_ANNOTATIONS"] = str(
             _resolve_launch_path(args.annotations)
         )
     if args.annotation_run:
-        os.environ["MMEDIT_COMPBENCH_ANNOTATIONS"] = ""
-        os.environ["MMEDIT_COMPBENCH_ANNOTATION_RUN"] = args.annotation_run
+        os.environ["MIXED_PROMPT_COMPBENCH_ANNOTATIONS"] = ""
+        os.environ["MIXED_PROMPT_COMPBENCH_ANNOTATION_RUN"] = args.annotation_run
     if args.output_root:
-        os.environ["MMEDIT_COMPBENCH_OUTPUT_DIR"] = str(
+        os.environ["MIXED_PROMPT_COMPBENCH_OUTPUT_DIR"] = str(
             _resolve_launch_path(args.output_root)
         )
 

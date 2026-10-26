@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run MMEdit mixed-prompt inference on RefEdit-Bench annotations."
+        description="Run MixedPrompt mixed-prompt inference on RefEdit-Bench annotations."
     )
     annotation_group = parser.add_mutually_exclusive_group()
     annotation_group.add_argument(
@@ -112,14 +112,14 @@ def main(argv: list[str] | None = None, pool: ModelPool | None = None) -> None:
     load_project_environment()
 
     if args.annotations:
-        os.environ["MMEDIT_REFEDIT_BENCH_ANNOTATIONS"] = str(
+        os.environ["MIXED_PROMPT_REFEDIT_BENCH_ANNOTATIONS"] = str(
             _resolve_launch_path(args.annotations)
         )
     if args.annotation_run:
-        os.environ["MMEDIT_REFEDIT_BENCH_ANNOTATIONS"] = ""
-        os.environ["MMEDIT_REFEDIT_BENCH_ANNOTATION_RUN"] = args.annotation_run
+        os.environ["MIXED_PROMPT_REFEDIT_BENCH_ANNOTATIONS"] = ""
+        os.environ["MIXED_PROMPT_REFEDIT_BENCH_ANNOTATION_RUN"] = args.annotation_run
     if args.output_root:
-        os.environ["MMEDIT_REFEDIT_BENCH_OUTPUT_DIR"] = str(
+        os.environ["MIXED_PROMPT_REFEDIT_BENCH_OUTPUT_DIR"] = str(
             _resolve_launch_path(args.output_root)
         )
 

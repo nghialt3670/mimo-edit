@@ -137,7 +137,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--display-name",
-        default="mimo-edit-batch",
+        default="mixed-prompt-batch",
         help="Display name for the uploaded file.",
     )
     return parser.parse_args()
@@ -270,12 +270,12 @@ def main() -> int:
 
     api_key = (
         os.environ.get("GEMINI_API_KEY")
-        or os.environ.get("MMEDIT_API_KEY")
+        or os.environ.get("MIXED_PROMPT_API_KEY")
         or os.environ.get("GOOGLE_API_KEY")
     )
     if not api_key:
         print(
-            "Error: GEMINI_API_KEY, MMEDIT_API_KEY or GOOGLE_API_KEY is not set.\n"
+            "Error: GEMINI_API_KEY, MIXED_PROMPT_API_KEY or GOOGLE_API_KEY is not set.\n"
             "macOS/Linux: export GEMINI_API_KEY='your-api-key'\n"
             "PowerShell:  $env:GEMINI_API_KEY='your-api-key'",
             file=sys.stderr,
@@ -305,7 +305,7 @@ def main() -> int:
             uploaded = google_client.files.upload(
                 file=file,
                 config=types.UploadFileConfig(
-                    display_name="mimo-edit-batch",
+                    display_name="mixed-prompt-batch",
                     mime_type="jsonl",
                 ),
             )
