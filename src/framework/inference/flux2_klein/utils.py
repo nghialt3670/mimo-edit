@@ -29,12 +29,12 @@ def harmonize_with_mask(predictor, image: Image.Image, mask: Image.Image):
 
 def generate_klein_edit(
     pipeline: Flux2KleinPipeline,
-    image: Image.Image,
+    image: Image.Image | list[Image.Image],
     prompt: str,
     config: KleinInferenceConfig,
     seed_offset: int = 0,
     *,
-    lora_strength: float = 0.0,
+    lora_strength: float = 0.6,
 ) -> Image.Image:
     """Generate an image, optionally enabling the edit-consistency LoRA.
 
@@ -175,7 +175,7 @@ def blend_edit(
     after: Image.Image,
     mask: np.ndarray,
     *,
-    harmonize: bool = True,
+    harmonize: bool = False,
     extra_weight: np.ndarray | None = None,
     debug: dict | None = None,
 ) -> tuple[Image.Image, np.ndarray]:

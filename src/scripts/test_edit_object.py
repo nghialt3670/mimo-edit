@@ -27,7 +27,7 @@ from framework.inference.sam3 import sam3_segment_mask
 from framework.utils.randomness import seed_random_generators
 
 DEFAULT_PROMPTS = [
-    "Change the color of the object to blue",
+    "Change the cat into an slightly orange cat",
 ]
 DATASET_ID = "ziqiangoodgood/MIRAGE"
 ANNOTATION_ROOT = Path(".out/annotation/mira_bench")

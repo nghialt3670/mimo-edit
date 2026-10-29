@@ -297,6 +297,10 @@ def build_agent_context(
         "loose tie, and pose.' Include all requested attributes and preserve "
         "unmentioned details. Use other registered tools when they better match the "
         "requested operation.",
+        "To match, copy, or transfer the color, material, or style of another object, "
+        "segment that object for its visual prompt, then call edit_object in local mode "
+        "with reference_image=image_0 and reference_mask set to that object's mask. "
+        "Describe in the prompt which attributes to transfer.",
     ]
     lines.append(
         "If text segmentation finds no match, do not repeat near-identical prompts; "
